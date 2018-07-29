@@ -373,9 +373,25 @@ static void bcm47xxnflash_ops_bcm5357_write_buf(struct mtd_info *mtd,
  * Init
  **************************************************/
 
+/* uint32 */
+/* si_pmu_chipcontrol(si_t *sih, uint reg, uint32 mask, uint32 val) */
+/* { */
+/* 	pmu_corereg(sih, SI_CC_IDX, chipcontrol_addr, ~0, reg); */
+/* 	return pmu_corereg(sih, SI_CC_IDX, chipcontrol_data, mask, val); */
+/* } */
+
+
 int bcm47xxnflash_ops_bcm5357_init(struct bcm47xxnflash *b47n)
 {
 	pr_info("ops_bcm5357 worked!\n");
+
+	/* Enable flash */
+	//si_pmu_chipcontrol(sih, 1, CCTRL5357_NFLASH, CCTRL5357_NFLASH);
+	// Write bit 16 to chipcontrol register 0x650
+	//BCMA_CC_PMU_CHIPCTL_ADDR
+	bcma_pmu_write32(b47n->cc, BCMA_CC_PMU_CHIPCTL_ADDR, BCMA_CC_PMU_CHIPCTL_ADDR);
+	bcma_pmu_set32(b47n->cc, BCMA_CC_PMU_CHIPCTL_DATA, BCMA_CHIPCTL_5357_NFLASH);
+
 /* 	struct nand_chip *nand_chip = (struct nand_chip *)&b47n->nand_chip; */
 /* 	int err; */
 /* 	u32 freq; */
