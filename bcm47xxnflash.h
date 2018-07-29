@@ -22,5 +22,6 @@ struct bcm47xxnflash {
 };
 
 int bcm47xxnflash_ops_bcm4706_init(struct bcm47xxnflash *b47n);
+int bcm47xxnflash_ops_bcm5357_init(struct bcm47xxnflash *b47n);
 
 #endif /* BCM47XXNFLASH */
