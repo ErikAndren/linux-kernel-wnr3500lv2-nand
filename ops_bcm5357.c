@@ -17,36 +17,66 @@
 #include <linux/delay.h>
 #include <linux/bcma/bcma.h>
 
-/* Broadcom uses 1'000'000 but it seems to be too many. Tests on WNDR4500 has
- * shown ~1000 retries as maxiumum. */
-#define NFLASH_READY_RETRIES		10000
+/* nand_cmd_start commands */
+/* These are stolen from brcm/mips/include/nand.h, maybe these are already defined somewhere in the kernel source tree */
+#define NCMD_NULL			0
+#define NCMD_PAGE_RD			1
+#define NCMD_SPARE_RD			2
+#define NCMD_STATUS_RD			3
+#define NCMD_PAGE_PROG			4
+#define NCMD_SPARE_PROG			5
+#define NCMD_COPY_BACK			6
+#define NCMD_ID_RD			7
+#define NCMD_BLOCK_ERASE		8
+#define NCMD_FLASH_RESET		9
+#define NCMD_LOCK			0xa
+#define NCMD_LOCK_DOWN			0xb
+#define NCMD_UNLOCK			0xc
+#define NCMD_LOCK_STATUS		0xd
 
-#define NFLASH_SECTOR_SIZE		512
+/* nand_intfc_status */
+#define	NIST_CTRL_READY			0x80000000
+#define	NIST_FLASH_READY		0x40000000
+#define	NIST_CACHE_VALID		0x20000000
+#define	NIST_SPARE_VALID		0x10000000
+#define	NIST_ERASED			0x08000000
+#define	NIST_STATUS			0x000000ff
 
-#define NCTL_CMD0			0x00010000
-#define NCTL_COL			0x00020000	/* Update column with value from BCMA_CC_NFLASH_COL_ADDR */
-#define NCTL_ROW			0x00040000	/* Update row (page) with value from BCMA_CC_NFLASH_ROW_ADDR */
-#define NCTL_CMD1W			0x00080000
-#define NCTL_READ			0x00100000
-#define NCTL_WRITE			0x00200000
-#define NCTL_SPECADDR			0x01000000
-#define NCTL_READY			0x04000000
-#define NCTL_ERR			0x08000000
-#define NCTL_CSA			0x40000000
-#define NCTL_START			0x80000000
+#define NF_RETRIES	1000000
 
 /**************************************************
  * Various helpers
  **************************************************/
-
-static inline u8 bcm47xxnflash_ops_bcm5357_ns_to_cycle(u16 ns, u16 clock)
+static inline void bcm47xxnflash_ops_bcm5357_cmd(struct bcma_drv_cc *cc, u32 opcode)
 {
-	return ((ns * 1000 * clock) / 1000000) + 1;
+	bcma_cc_write32(cc, BCMA_CC_NAND_CMD_START, opcode);
+	/* Read after write to flush the command */
+	bcma_cc_read32(cc, BCMA_CC_NAND_CMD_START);
 }
+
+static void bcm47xxnflash_ops_bcm5357_enable(struct bcma_drv_cc *cc, bool enable)
+{
+	u32 mask;
+	u32 val;
+
+	mask = ~(BCMA_CHIPCTL_5357_NFLASH);
+	val = 0;
+	if (enable) {
+		val = BCMA_CHIPCTL_5357_NFLASH;
+	}
+
+	bcma_pmu_maskset32(cc, BCMA_CC_PMU_CHIPCTL_DATA, mask, val);
+}
+
+/* static inline u8 bcm47xxnflash_ops_bcm5357_ns_to_cycle(u16 ns, u16 clock) */
+/* { */
+/* 	return ((ns * 1000 * clock) / 1000000) + 1; */
+/* } */
 
 static int bcm47xxnflash_ops_bcm5357_ctl_cmd(struct bcma_drv_cc *cc, u32 code)
 {
 	/* int i = 0; */
+	/* Issue a nand flash control command; this is used for BCM4706 */
 
 	/* bcma_cc_write32(cc, BCMA_CC_NFLASH_CTL, NCTL_START | code); */
 	/* for (i = 0; i < NFLASH_READY_RETRIES; i++) { */
@@ -59,26 +89,26 @@ static int bcm47xxnflash_ops_bcm5357_ctl_cmd(struct bcma_drv_cc *cc, u32 code)
 	/* 	pr_err("NFLASH control command not ready!\n"); */
 	/* 	return -EBUSY; */
 	/* } */
+
 	return 0;
 }
 
+/* Poll for command completion. Returns zero when complete. */
 static int bcm47xxnflash_ops_bcm5357_poll(struct bcma_drv_cc *cc)
 {
-	/* int i; */
+	int i;
+	u32 val;
 
-	/* for (i = 0; i < NFLASH_READY_RETRIES; i++) { */
-	/* 	if (bcma_cc_read32(cc, BCMA_CC_NFLASH_CTL) & NCTL_READY) { */
-	/* 		if (bcma_cc_read32(cc, BCMA_CC_NFLASH_CTL) & */
-	/* 		    BCMA_CC_NFLASH_CTL_ERR) { */
-	/* 			pr_err("Error on polling\n"); */
-	/* 			return -EBUSY; */
-	/* 		} else { */
-	/* 			return 0; */
-	/* 		} */
-	/* 	} */
-	/* } */
+	for (i = 0; i < NF_RETRIES; i++) {
+		val = bcma_cc_read32(cc, BCMA_CC_NAND_INTFC_STATUS);
 
-	/* pr_err("Polling timeout!\n"); */
+		if ((val & (NIST_CTRL_READY | NIST_FLASH_READY)) ==
+		     (NIST_CTRL_READY | NIST_FLASH_READY)) {
+			return 0;
+		}
+	}
+
+	pr_err("Polling timeout!\n");
 	return -EBUSY;
 }
 
@@ -373,27 +403,39 @@ static void bcm47xxnflash_ops_bcm5357_write_buf(struct mtd_info *mtd,
  * Init
  **************************************************/
 
-/* uint32 */
-/* si_pmu_chipcontrol(si_t *sih, uint reg, uint32 mask, uint32 val) */
-/* { */
-/* 	pmu_corereg(sih, SI_CC_IDX, chipcontrol_addr, ~0, reg); */
-/* 	return pmu_corereg(sih, SI_CC_IDX, chipcontrol_data, mask, val); */
-/* } */
-
-
 int bcm47xxnflash_ops_bcm5357_init(struct bcm47xxnflash *b47n)
 {
-	pr_info("ops_bcm5357 worked!\n");
+	int err;
+	u32 id[2];
+	u32 val;
 
-	/* Enable flash */
-	//si_pmu_chipcontrol(sih, 1, CCTRL5357_NFLASH, CCTRL5357_NFLASH);
-	// Write bit 16 to chipcontrol register 0x650
-	//BCMA_CC_PMU_CHIPCTL_ADDR
-	bcma_pmu_write32(b47n->cc, BCMA_CC_PMU_CHIPCTL_ADDR, BCMA_CC_PMU_CHIPCTL_ADDR);
-	bcma_pmu_set32(b47n->cc, BCMA_CC_PMU_CHIPCTL_DATA, BCMA_CHIPCTL_5357_NFLASH);
+	pr_info("Initializing bcm5357 NAND controller\n");
+	err = 0;
+
+	bcm47xxnflash_ops_bcm5357_enable(b47n->cc, true);
+
+	pr_info("Reading NAND flash memory id\n");
+	/* Read memory id */
+	bcm47xxnflash_ops_bcm5357_cmd(b47n->cc, NCMD_ID_RD);
+
+	/* Poll for result */
+	if (bcm47xxnflash_ops_bcm5357_poll(b47n->cc) < 0) {
+		err = -ENOTSUPP;
+		goto exit;
+	}
+
+	id[0] = bcma_cc_read32(b47n->cc, BCMA_CC_NAND_DEVID);
+	id[1] = bcma_cc_read32(b47n->cc, BCMA_CC_NAND_DEVID_X);
+	pr_info("NAND id: 0x%08x, idx: 0x%08x\n", id[0], id[1]);
+
+	/* Return negative for now to stop further nand booting */
+	return -1;
+exit:
+	/* Disable flash */
+	bcm47xxnflash_ops_bcm5357_enable(b47n->cc, false);
+        return err;
 
 /* 	struct nand_chip *nand_chip = (struct nand_chip *)&b47n->nand_chip; */
-/* 	int err; */
 /* 	u32 freq; */
 /* 	u16 clock; */
 /* 	u8 w0, w1, w2, w3, w4; */
@@ -475,5 +517,4 @@ int bcm47xxnflash_ops_bcm5357_init(struct bcm47xxnflash *b47n)
 /* 		bcma_cc_mask32(b47n->cc, BCMA_CC_5357_FLASHSCFG, */
 /* 			       ~BCMA_CC_5357_FLASHSCFG_NF1); */
 /* 	return err; */
-    return 0;
 }
