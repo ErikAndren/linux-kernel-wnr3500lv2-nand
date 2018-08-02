@@ -110,6 +110,11 @@ static inline int bcm47xxnflash_ops_bcm5357_ctl_cmd(struct bcma_drv_cc *cc, u32 
 	return 0;
 }
 
+static inline u8 bcm47xxnnflash_ops_bcm5357_check_status(struct bcma_drv_cc *cc)
+{
+	return bcma_cc_read32(cc, BCMA_CC_NAND_INTFC_STATUS) & (NIST_STATUS & 1);
+}
+
 static inline void bcm47xxnflash_ops_bcm5357_calc_and_set_offset(struct bcma_drv_cc *cc, int page_addr, int column) {
 	/* FIXME: Hardcoded page size for now */
 	/* Do we need to account for spare area? */
@@ -159,6 +164,7 @@ static void bcm47xxnflash_ops_bcm5357_read(struct mtd_info *mtd, uint8_t *buf,
 	struct nand_chip *nand_chip = mtd_to_nand(mtd);
 	struct bcm47xxnflash *b47n = nand_get_controller_data(nand_chip);
 	struct bcma_drv_cc *cc = b47n->cc;
+
 	u64 offset;
 	u32 *buf32;
 	int i;
@@ -240,8 +246,7 @@ static void bcm47xxnflash_ops_bcm5357_write(struct mtd_info *mtd,
 			break;
 		}
 
-		reg = bcma_cc_read32(cc, BCMA_CC_NAND_INTFC_STATUS);
-		if (reg & (NIST_STATUS & 1)) {
+		if (bcm47xxnnflash_ops_bcm5357_check_status(cc) > 0) {
 			pr_err("PAGE_PROG failed\n");
 			break;
 		}
@@ -304,6 +309,9 @@ static void bcm47xxnflash_ops_bcm5357_cmdfunc(struct mtd_info *mtd,
 	case NAND_CMD_RESET:
 		/* FIXME: Double check this */
 		bcm47xxnflash_ops_bcm5357_ctl_cmd(cc, NCMD_FLASH_RESET);
+		if (bcm47xxnflash_ops_bcm5357_poll(cc) < 0) {
+			pr_err("Failed FLASH_RESET\n");
+		}
 		break;
 	case NAND_CMD_READID:
 		bcm47xxnflash_ops_bcm5357_ctl_cmd(cc, NCMD_ID_RD);
@@ -311,6 +319,8 @@ static void bcm47xxnflash_ops_bcm5357_cmdfunc(struct mtd_info *mtd,
 			pr_err("Failed to read id\n");
 			break;
 		}
+
+		/* FIXME: Can surely be optimized with some casting cleverness */
 		reg = bcma_cc_read32(cc, BCMA_CC_NAND_DEVID);
 		memcpy(b47n->id_data, &reg, sizeof(reg));
 
@@ -321,7 +331,6 @@ static void bcm47xxnflash_ops_bcm5357_cmdfunc(struct mtd_info *mtd,
 		bcm47xxnflash_ops_bcm5357_ctl_cmd(cc, NCMD_STATUS_RD);
 		break;
 	case NAND_CMD_READ0:
-	case NAND_CMD_READ1:
 		/* FIXME: Nop this as the 4706, no clue what to do */
 		break;
 	case NAND_CMD_READOOB:
@@ -329,14 +338,18 @@ static void bcm47xxnflash_ops_bcm5357_cmdfunc(struct mtd_info *mtd,
 			b47n->curr_column += mtd->writesize;
 		break;
 	case NAND_CMD_ERASE1:
+		/* FIXME: Do we need to check for non block aligned offsets */
 		bcm47xxnflash_ops_bcm5357_calc_and_set_offset(cc, page_addr, column);
 		bcm47xxnflash_ops_bcm5357_ctl_cmd(cc, NCMD_BLOCK_ERASE);
 		if (bcm47xxnflash_ops_bcm5357_poll(cc) < 0) {
-			pr_err("Failed to erase block\n");
+			pr_err("Failed BLOCK_ERASE cmd\n");
+			break;
 		}
-		break;
+		if (bcm47xxnnflash_ops_bcm5357_check_status(cc) > 0) {
+			pr_err("Bad NIST_STATUS after block erase\n");
+			break;
+		}
 	case NAND_CMD_ERASE2:
-		/* FIXME: Nop this as the 4706, no clue what to do */
 		break;
 	case NAND_CMD_SEQIN:
 		bcm47xxnflash_ops_bcm5357_calc_and_set_offset(cc, page_addr, column);
@@ -469,6 +482,15 @@ int bcm47xxnflash_ops_bcm5357_init(struct bcm47xxnflash *b47n)
 	/* FIXME: Must enable ecc configuration here */
 
 	bcm47xxnflash_ops_bcm5357_enable(cc, true);
+
+	/* Scan NAND */
+	pr_err("Scanning nand\n");
+	err = nand_scan(nand_to_mtd(&b47n->nand_chip), 1);
+	if (err) {
+		pr_err("Could not scan NAND flash: %d\n", err);
+		goto exit;
+	}
+	pr_err("Page shift is %d\n", b47n->nand_chip.page_shift);
 
 	/* Return negative for now to stop further nand booting */
 	err = -1;
