@@ -87,9 +87,9 @@
 /* 1 Block is 64 pages (128k + 4k), 1 Page = 2K + 64 bytes */
 /* 65536 pages i.e 16 bits */
 /* Column address is A0 - A11 = 12 bits = 2**12 = 4096 bytes */
-/* Highest bit 12 is used to access spare bits
+/* Highest bit 12 is used to access spare bits */
 /* Row address is A12 - A27 = 16 bits */
-/* FIXME: Double check this, hard coded for the WNR3500LV2
+/* FIXME: Double check this, hard coded for the WNR3500LV2 */
 #define K9F1G08X0D_PAGE_SZ 2048
 #define K9F1G08X0D_COL_SZ 11
 
@@ -110,10 +110,10 @@ static inline int bcm47xxnflash_ops_bcm5357_ctl_cmd(struct bcma_drv_cc *cc, u32 
 	return 0;
 }
 
-static inline void bcm47xxnflash_ops_bcm5357_calc_and_set_offset(struct bcma_drv_cc *cc, int page page_addr, int column) {
+static inline void bcm47xxnflash_ops_bcm5357_calc_and_set_offset(struct bcma_drv_cc *cc, int page_addr, int column) {
 	/* FIXME: Hardcoded page size for now */
 	/* Do we need to account for spare area? */
-	bcma_cc_write32(cc, BCMA_CC_NAND_CMD_ADDR, (b47n->curr_page_addr << K9F1G08X0D_COL_SZ) | b47n->curr_column));
+	bcma_cc_write32(cc, BCMA_CC_NAND_CMD_ADDR, (page_addr << K9F1G08X0D_COL_SZ) | column);
 }
 
 static void bcm47xxnflash_ops_bcm5357_enable(struct bcma_drv_cc *cc, bool enable)
@@ -160,12 +160,12 @@ static void bcm47xxnflash_ops_bcm5357_read(struct mtd_info *mtd, uint8_t *buf,
 	struct bcm47xxnflash *b47n = nand_get_controller_data(nand_chip);
 	struct bcma_drv_cc *cc = b47n->cc;
 	u64 offset;
-	uint32 *buf32;
+	u32 *buf32;
 	int i;
 	int toread;
 
 	buf32 = (u32 *) buf;
-	offset = (b47n->curr_page_addr << K9F1G08X0D_COL_SZ) | b47n->curr_column);
+	offset = (b47n->curr_page_addr << K9F1G08X0D_COL_SZ) | b47n->curr_column;
 	while (len > 0) {
 		bcma_cc_write32(cc, BCMA_CC_NAND_CMD_ADDR, offset);
 		bcm47xxnflash_ops_bcm5357_ctl_cmd(cc, NCMD_PAGE_RD);
@@ -204,7 +204,7 @@ static void bcm47xxnflash_ops_bcm5357_write(struct mtd_info *mtd,
 	int towrite;
 	u64 offset;
 
-        offset = (b47n->curr_page_addr << K9F1G08X0D_COL_SZ) | b47n->curr_column);
+        offset = (b47n->curr_page_addr << K9F1G08X0D_COL_SZ) | b47n->curr_column;
 	from = (u32 *) buf;
 
 	/* Disable partial page programming */
@@ -261,17 +261,20 @@ static void bcm47xxnflash_ops_bcm5357_cmd_ctrl(struct mtd_info *mtd, int cmd,
 {
 	struct nand_chip *nand_chip = mtd_to_nand(mtd);
 	struct bcm47xxnflash *b47n = nand_get_controller_data(nand_chip);
+	struct bcma_drv_cc *cc = b47n->cc;
 
 	if (cmd == NAND_CMD_NONE)
 		return;
 
-	bcm47xxnflash_ops_bcm5357_ctl_cmd(b47n->cc, cmd);
+	bcm47xxnflash_ops_bcm5357_ctl_cmd(cc, cmd);
 }
 
 static int bcm47xxnflash_ops_bcm5357_dev_ready(struct mtd_info *mtd)
 {
 	struct nand_chip *nand_chip = mtd_to_nand(mtd);
 	struct bcm47xxnflash *b47n = nand_get_controller_data(nand_chip);
+	struct bcma_drv_cc *cc = b47n->cc;
+
 	u32 val;
 
 	val = bcma_cc_read32(cc, BCMA_CC_NAND_INTFC_STATUS);
@@ -308,10 +311,10 @@ static void bcm47xxnflash_ops_bcm5357_cmdfunc(struct mtd_info *mtd,
 			pr_err("Failed to read id\n");
 			break;
 		}
-		reg = bcma_cc_read32(b47n->cc, BCMA_CC_NAND_DEVID);
+		reg = bcma_cc_read32(cc, BCMA_CC_NAND_DEVID);
 		memcpy(b47n->id_data, &reg, sizeof(reg));
 
-	        reg = bcma_cc_read32(b47n->cc, BCMA_CC_NAND_DEVID_X);
+	        reg = bcma_cc_read32(cc, BCMA_CC_NAND_DEVID_X);
 		memcpy(b47n->id_data + sizeof(reg), &reg, sizeof(reg));
 		break;
 	case NAND_CMD_STATUS:
@@ -374,16 +377,15 @@ static u8 bcm47xxnflash_ops_bcm5357_read_byte(struct mtd_info *mtd)
 {
 	struct nand_chip *nand_chip = mtd_to_nand(mtd);
 	struct bcm47xxnflash *b47n = nand_get_controller_data(nand_chip);
-	struct bcma_drv_cc *cc = b47n->cc;
 	u8 data;
 	u32 tmp;
 
+	data = 0;
 	switch (b47n->curr_command) {
 	case NAND_CMD_READID:
 		if (b47n->curr_column >= ARRAY_SIZE(b47n->id_data)) {
 			pr_err("Requested invalid id_data: %d\n",
 			       b47n->curr_column);
-			data = 0;
 			break;
 		}
 		data = b47n->id_data[b47n->curr_column++];
@@ -439,14 +441,12 @@ static void bcm47xxnflash_ops_bcm5357_write_buf(struct mtd_info *mtd,
 
 int bcm47xxnflash_ops_bcm5357_init(struct bcm47xxnflash *b47n)
 {
+	struct bcma_drv_cc *cc = b47n->cc;
+	struct nand_chip *nand_chip = (struct nand_chip *)&b47n->nand_chip;
 	int err;
-	u32 id[2];
-	u32 reg;
 
 	pr_info("Initializing bcm5357 NAND controller\n");
 	err = 0;
-
-	struct nand_chip *nand_chip = (struct nand_chip *)&b47n->nand_chip;
 
 	nand_chip->cmd_ctrl = bcm47xxnflash_ops_bcm5357_cmd_ctrl;
 	nand_chip->dev_ready = bcm47xxnflash_ops_bcm5357_dev_ready;
@@ -468,12 +468,14 @@ int bcm47xxnflash_ops_bcm5357_init(struct bcm47xxnflash *b47n)
 
 	/* FIXME: Must enable ecc configuration here */
 
-	bcm47xxnflash_ops_bcm5357_enable(b47n->cc, true);
+	bcm47xxnflash_ops_bcm5357_enable(cc, true);
 
 	/* Return negative for now to stop further nand booting */
-	return -1;
+	err = -1;
+	goto exit;
+
 exit:
 	/* Disable flash */
-	bcm47xxnflash_ops_bcm5357_enable(b47n->cc, false);
+	bcm47xxnflash_ops_bcm5357_enable(cc, false);
         return err;
 }
