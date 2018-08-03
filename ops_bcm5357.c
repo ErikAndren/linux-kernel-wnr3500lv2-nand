@@ -340,7 +340,10 @@ static void bcm47xxnflash_ops_bcm5357_cmdfunc(struct mtd_info *mtd,
 	case NAND_CMD_ERASE1:
 		/* FIXME: Do we need to check for non block aligned offsets */
 		bcm47xxnflash_ops_bcm5357_calc_and_set_offset(cc, page_addr, column);
-		bcm47xxnflash_ops_bcm5357_ctl_cmd(cc, NCMD_BLOCK_ERASE);
+                pr_err("BLOCK_ERASE disabled for now\n");
+
+/* bcm47xxnflash_ops_bcm5357_ctl_cmd(cc, NCMD_BLOCK_ERASE); */
+
 		if (bcm47xxnflash_ops_bcm5357_poll(cc) < 0) {
 			pr_err("Failed BLOCK_ERASE cmd\n");
 			break;
@@ -474,10 +477,10 @@ int bcm47xxnflash_ops_bcm5357_init(struct bcm47xxnflash *b47n)
 
 	/* As per K9F1G08U0D data sheet Rev 0.0 Dec 9 2009, page 13 tR */
 	nand_chip->chip_delay = 35;
-	b47n->nand_chip.bbt_options = NAND_BBT_USE_FLASH;
+	b47n->nand_chip.bbt_options = NAND_BBT_NO_OOB_BBM | NAND_BBT_USE_FLASH;
 
-	/* Just hoping for the best */
-	b47n->nand_chip.ecc.mode = NAND_ECC_HW;
+	/* FIXME: Just hoping for the best */
+	b47n->nand_chip.ecc.mode = NAND_ECC_NONE;
 
 	/* FIXME: Must enable ecc configuration here */
 
@@ -486,11 +489,12 @@ int bcm47xxnflash_ops_bcm5357_init(struct bcm47xxnflash *b47n)
 	/* Scan NAND */
 	pr_err("Scanning nand\n");
 	err = nand_scan(nand_to_mtd(&b47n->nand_chip), 1);
+	pr_err("Page shift is %d\n", b47n->nand_chip.page_shift);
+
 	if (err) {
 		pr_err("Could not scan NAND flash: %d\n", err);
 		goto exit;
 	}
-	pr_err("Page shift is %d\n", b47n->nand_chip.page_shift);
 
 	/* Return negative for now to stop further nand booting */
 	err = -1;
