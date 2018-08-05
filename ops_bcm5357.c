@@ -77,12 +77,18 @@
 #define	NIST_SPARE_VALID		0x10000000
 #define	NIST_ERASED			0x08000000
 #define	NIST_STATUS			0x000000ff
+/* Below is assumed */
+#define NIST_FLASH_STATUS_ERROR         0x00000001
 
-#define NF_RETRIES	10000
+#define NF_RETRIES	                1000000
 #define NFL_SECTOR_SIZE			512
 
 #define BCM5357_CMD_DEBUG 1
 #define BCM5357_DATA_DEBUG 1
+
+#define BRCMNAND_FLASH_STATUS_ERROR         (-2)
+#define BRCMNAND_TIMED_OUT                  (-3)
+
 
 /* K9F1G08XD has 64K pages = 1024 blocks */
 /* 1 Block is 64 pages (128k + 4k), 1 Page = 2K + 64 bytes */
@@ -90,13 +96,9 @@
 /* Column address is A0 - A11 = 12 bits = 2**12 = 4096 bytes */
 /* Highest bit 12 is used to access spare bits */
 /* Row address is A12 - A27 = 16 bits */
-/* FIXME: Double check this, hard coded for the WNR3500LV2 */
-#define K9F1G08X0D_PAGE_SZ 2048
-#define K9F1G08X0D_COL_SZ 11
 
 /* Column is within a page */
 /* Page addr is all pages */
-
 
 /**************************************************
  * Various helpers
@@ -107,19 +109,18 @@ static inline int bcm47xxnflash_ops_bcm5357_ctl_cmd(struct bcma_drv_cc *cc, u32 
 	/* Read after write to flush the command */
 	bcma_cc_read32(cc, BCMA_CC_NAND_CMD_START);
 
-	/* FIXME: Add polling for completion here? */
+	__sync();
 	return 0;
 }
 
 static inline u8 bcm47xxnnflash_ops_bcm5357_check_status(struct bcma_drv_cc *cc)
 {
-	return bcma_cc_read32(cc, BCMA_CC_NAND_INTFC_STATUS) & (NIST_STATUS & 1);
+	return bcma_cc_read32(cc, BCMA_CC_NAND_INTFC_STATUS) & (NIST_STATUS & NIST_FLASH_STATUS_ERROR);
 }
 
-static inline void bcm47xxnflash_ops_bcm5357_calc_and_set_offset(struct bcma_drv_cc *cc, int page_addr, int column) {
-	/* FIXME: Hardcoded page size for now */
+static inline void bcm47xxnflash_ops_bcm5357_calc_and_set_offset(struct bcm47xxnflash *b47n, int page_addr, int column) {
 	/* Do we need to account for spare area? */
-	bcma_cc_write32(cc, BCMA_CC_NAND_CMD_ADDR, (page_addr << K9F1G08X0D_COL_SZ) | column);
+	bcma_cc_write32(b47n->cc, BCMA_CC_NAND_CMD_ADDR, (page_addr << b47n->nand_chip.page_shift + 1) | column);
 }
 
 static void bcm47xxnflash_ops_bcm5357_enable(struct bcma_drv_cc *cc, bool enable)
@@ -133,7 +134,19 @@ static void bcm47xxnflash_ops_bcm5357_enable(struct bcma_drv_cc *cc, bool enable
 		val = BCMA_CHIPCTL_5357_NFLASH;
 	}
 
+	bcma_pmu_write32(cc, BCMA_CC_PMU_CHIPCTL_ADDR, 1);
+
+#ifdef BCM5357_CMD_DEBUG
+	val = bcma_pmu_read32(cc, BCMA_CC_PMU_CHIPCTL_DATA);
+	pr_err("Pre enable write: bcm5357_enable: 0x%08x\n", val);
+#endif
 	bcma_pmu_maskset32(cc, BCMA_CC_PMU_CHIPCTL_DATA, mask, val);
+
+#ifdef BCM5357_CMD_DEBUG
+	val = bcma_pmu_read32(cc, BCMA_CC_PMU_CHIPCTL_DATA);
+	pr_err("Post enable write: bcm5357_enable: 0x%08x\n", val);
+#endif
+
 }
 
 /* Poll for command completion. Returns zero when complete. */
@@ -149,15 +162,73 @@ static int bcm47xxnflash_ops_bcm5357_poll(struct bcma_drv_cc *cc)
 		     (NIST_CTRL_READY | NIST_FLASH_READY)) {
 			return 0;
 		}
+
+		if (val & NIST_FLASH_STATUS_ERROR) {
+			pr_err("Flash status error\n");
+			return BRCMNAND_FLASH_STATUS_ERROR;
+		}
 	}
 
 	pr_err("Polling timeout!\n");
-	return -EBUSY;
+	return BRCMNAND_TIMED_OUT;
 }
 
 /**************************************************
  * R/W
  **************************************************/
+static void bcm47xxnflash_ops_bcm5357_read_oob(struct mtd_info *mtd, uint8_t *buf,
+					   int len)
+{
+	struct nand_chip *nand_chip = mtd_to_nand(mtd);
+	struct bcm47xxnflash *b47n = nand_get_controller_data(nand_chip);
+	struct bcma_drv_cc *cc = b47n->cc;
+
+	u32 offset;
+	u32 *buf32;
+	int i;
+	int toread;
+
+	buf32 = (u32 *) buf;
+	offset = (b47n->curr_page_addr << (b47n->nand_chip.page_shift + 1)) | b47n->curr_column;
+
+#ifdef BCM5357_CMD_DEBUG
+	pr_err("bcm5357_read_oob, offset: 0x%08x, len: %d\n", offset, len);
+#endif
+
+	while (len > 0) {
+		bcma_cc_write32(cc, BCMA_CC_NAND_CMD_ADDR_X, 0);
+		bcma_cc_write32(cc, BCMA_CC_NAND_CMD_ADDR, offset);
+
+		__sync();
+		bcm47xxnflash_ops_bcm5357_ctl_cmd(cc, NCMD_SPARE_RD);
+		if (bcm47xxnflash_ops_bcm5357_poll(cc) < 0) {
+			pr_err("Failed SPARE_RD\n");
+			break;
+		}
+
+		if ((bcma_cc_read32(cc, BCMA_CC_NAND_INTFC_STATUS) & NIST_SPARE_VALID) == 0) {
+			pr_err("Spare is not valid\n");
+			break;
+		}
+
+		__sync();
+
+		toread = min(len, (int) mtd->oobsize);
+		for (i = 0; i < toread; i += 4, buf32++) {
+			if (i < 16) {
+				*buf32 = bcma_cc_read32(cc, BCMA_CC_NAND_SPARE_RD0 + i);
+			} else if (i < 32) {
+				*buf32 = bcma_cc_read32(cc, BCMA_CC_NAND_SPARE_RD16 + (i - 16));
+			}
+#ifdef BCM5357_DATA_DEBUG
+			pr_err("bcm5357_read_oob, addr: 0x%08x, 0x%08x\n", offset + i, *buf32);
+#endif
+		}
+		offset += toread;
+		len -= toread;
+
+	}
+}
 
 static void bcm47xxnflash_ops_bcm5357_read(struct mtd_info *mtd, uint8_t *buf,
 					   int len)
@@ -166,40 +237,67 @@ static void bcm47xxnflash_ops_bcm5357_read(struct mtd_info *mtd, uint8_t *buf,
 	struct bcm47xxnflash *b47n = nand_get_controller_data(nand_chip);
 	struct bcma_drv_cc *cc = b47n->cc;
 
-	u64 offset;
+	u32 offset;
 	u32 *buf32;
 	int i;
 	int toread;
+	u32 reg;
+	int tries;
+	u32 mask;
 
+	mask = NFL_SECTOR_SIZE - 1;
 	buf32 = (u32 *) buf;
-	offset = (b47n->curr_page_addr << K9F1G08X0D_COL_SZ) | b47n->curr_column;
+	offset = (b47n->curr_page_addr << (b47n->nand_chip.page_shift + 1)) | b47n->curr_column;
 
 #ifdef BCM5357_CMD_DEBUG
-	pr_err("Page shift is %d\n", b47n->nand_chip.page_shift);
-	pr_err("bcm5357_read, offset: 0x%08llx, len: %d\n", offset, len);
+	pr_err("bcm5357_read, offset: 0x%08x, len: %d\n", offset, len);
 #endif
+
+	if (offset & mask) {
+		pr_err("bcm5357: Tried perform a non-aligned read\n");
+		return;
+	}
+
+	tries = 0;
+
+	bcma_cc_write32(cc, BCMA_CC_NAND_CMD_ADDR_X, 0);
 
 	while (len > 0) {
 		bcma_cc_write32(cc, BCMA_CC_NAND_CMD_ADDR, offset);
+
+		__sync();
 		bcm47xxnflash_ops_bcm5357_ctl_cmd(cc, NCMD_PAGE_RD);
 		if (bcm47xxnflash_ops_bcm5357_poll(cc) < 0) {
 			pr_err("Failed PAGE_RD\n");
-		}
-
-		if ((bcma_cc_read32(cc, BCMA_CC_NAND_INTFC_STATUS) & NIST_CACHE_VALID) == 0) {
-			pr_err("Read cache not valid\n");
 			break;
 		}
 
+		if ((bcma_cc_read32(cc, BCMA_CC_NAND_INTFC_STATUS) & NIST_CACHE_VALID) == 0) {
+			if (tries < 3) {
+				tries++;
+				pr_err("Read cache not valid, trying again(%d/3)\n", tries);
+				continue;
+			} else {
+				pr_err("Read cache not valid, giving up\n");
+				break;
+			}
+		}
+		tries = 0;
+
 		/* FIXME: Can this be omitted and moved to the init part of the function? */
+		/* Maybe omit? */
 		bcma_cc_write32(cc, BCMA_CC_NAND_CACHE_ADDR, 0);
 
-		toread = min(len, NFL_SECTOR_SIZE);
+		__sync();
 		/* PIO Read, is DMA possible? Maybe not worth it if one only can read out 512 bytes in one go */
+		toread = min(len, NFL_SECTOR_SIZE);
 		for (i = 0; i < toread; i += sizeof(buf32), buf32++) {
 			*buf32 = bcma_cc_read32(cc, BCMA_CC_NAND_CACHE_DATA);
 #ifdef BCM5357_DATA_DEBUG
-			pr_err("bcm5357_read, addr: 0x%016llx, contained: 0x%08x\n", offset + i, *buf32);
+			if (i == 0) {
+				reg = bcma_cc_read32(cc, BCMA_CC_NAND_CACHE_ADDR);
+				pr_err("bcm5357_read, addr: 0x%08x, cache addr: 0x%08x, 0x%08x\n", offset + i, reg, *buf32);
+			}
 #endif
 		}
 		len -= toread;
@@ -220,7 +318,7 @@ static void bcm47xxnflash_ops_bcm5357_write(struct mtd_info *mtd,
 	int towrite;
 	u64 offset;
 
-        offset = (b47n->curr_page_addr << K9F1G08X0D_COL_SZ) | b47n->curr_column;
+        offset = (b47n->curr_page_addr << (b47n->nand_chip.page_shift + 1)) | b47n->curr_column;
 	from = (u32 *) buf;
 
 #ifdef BCM5357_CMD_DEBUG
@@ -233,8 +331,7 @@ static void bcm47xxnflash_ops_bcm5357_write(struct mtd_info *mtd,
 	bcma_cc_write32(cc, BCMA_CC_NAND_ACC_CONTROL, reg);
 
 	while (len > 0) {
-		/* FIXME: Do not rely on flash specific page size */
-		towrite = min(len, K9F1G08X0D_PAGE_SZ);
+		towrite = min(len, (int) mtd->writesize);
 		bcma_cc_write32(cc, BCMA_CC_NAND_CACHE_ADDR, 0);
 		/* Transfer data to nand controller cache */
 		for (i = 0; i < towrite; i += sizeof(from), from++) {
@@ -248,8 +345,11 @@ static void bcm47xxnflash_ops_bcm5357_write(struct mtd_info *mtd,
 		}
 
 		/* Set cmd address to end of page - last sector size */
-		bcma_cc_write32(cc, BCMA_CC_NAND_CMD_ADDR, offset + K9F1G08X0D_PAGE_SZ - NFL_SECTOR_SIZE);
-		bcm47xxnflash_ops_bcm5357_ctl_cmd(cc, NCMD_PAGE_PROG);
+		bcma_cc_write32(cc, BCMA_CC_NAND_CMD_ADDR, offset + mtd->writesize - NFL_SECTOR_SIZE);
+		pr_err("Page programming disabled for now\n");
+		return;
+
+		/* bcm47xxnflash_ops_bcm5357_ctl_cmd(cc, NCMD_PAGE_PROG); */
 		if (bcm47xxnflash_ops_bcm5357_poll(cc) < 0) {
 			pr_err("Failed PAGE_PROG\n");
 			break;
@@ -274,11 +374,6 @@ static void bcm47xxnflash_ops_bcm5357_write(struct mtd_info *mtd,
 /**************************************************
  * NAND chip ops
  **************************************************/
-static int bcm47xxnflash_ops_bcm5357_scan_bbt(struct mtd_info *mtd, struct nand_bbt_descr *bd)
-{
-	return 0;
-}
-
 static void bcm47xxnflash_ops_bcm5357_cmd_ctrl(struct mtd_info *mtd, int cmd,
 					       unsigned int ctrl)
 {
@@ -362,12 +457,12 @@ static void bcm47xxnflash_ops_bcm5357_cmdfunc(struct mtd_info *mtd,
 		reg = bcma_cc_read32(cc, BCMA_CC_NAND_DEVID);
 		memcpy(b47n->id_data, &reg, sizeof(reg));
 #ifdef BCM5357_CMD_DEBUG
-		pr_err("bcm5357_cmdfunc, NAND_CMD_READ_BYTE, DEVID contained: 0x%08x\n", reg);
+		pr_err("bcm5357_cmdfunc, NAND_CMD_READ_BYTE, DEVID: 0x%08x\n", reg);
 #endif
 
 	        reg = bcma_cc_read32(cc, BCMA_CC_NAND_DEVID_X);
 #ifdef BCM5357_CMD_DEBUG
-		pr_err("bcm5357_cmdfunc, NAND_CMD_READ_BYTE, DEVID_X contained: 0x%08x\n", reg);
+		pr_err("bcm5357_cmdfunc, NAND_CMD_READ_BYTE, DEVID_X: 0x%08x\n", reg);
 #endif
 
 		memcpy(b47n->id_data + sizeof(reg), &reg, sizeof(reg));
@@ -388,7 +483,7 @@ static void bcm47xxnflash_ops_bcm5357_cmdfunc(struct mtd_info *mtd,
 		break;
 	case NAND_CMD_READOOB:
 #ifdef BCM5357_CMD_DEBUG
-		pr_err("bcm5357_cmdfunc, NAND_CMD_READOOB, col: %d, page: %d\n", column, page_addr);
+		pr_err("bcm5357_cmdfunc, NAND_CMD_READOOB, col: %d, page: %d, inc curr_column by: %d\n", column, page_addr, mtd->writesize);
 #endif
 
 		if (page_addr != -1)
@@ -400,7 +495,7 @@ static void bcm47xxnflash_ops_bcm5357_cmdfunc(struct mtd_info *mtd,
 #endif
 
 		/* FIXME: Do we need to check for non block aligned offsets */
-		bcm47xxnflash_ops_bcm5357_calc_and_set_offset(cc, page_addr, column);
+		bcm47xxnflash_ops_bcm5357_calc_and_set_offset(b47n, page_addr, column);
                 pr_err("BLOCK_ERASE disabled for now\n");
 
                 /* bcm47xxnflash_ops_bcm5357_ctl_cmd(cc, NCMD_BLOCK_ERASE); */
@@ -420,7 +515,7 @@ static void bcm47xxnflash_ops_bcm5357_cmdfunc(struct mtd_info *mtd,
 		pr_err("bcm5357_cmdfunc, NAND_CMD_SEQIN, col: %d, page: %d\n", column, page_addr);
 #endif
 
-		bcm47xxnflash_ops_bcm5357_calc_and_set_offset(cc, page_addr, column);
+		bcm47xxnflash_ops_bcm5357_calc_and_set_offset(b47n, page_addr, column);
 
 		/* FIXME: Double check this */
 		if (column >= mtd->writesize) {
@@ -486,7 +581,7 @@ static u8 bcm47xxnflash_ops_bcm5357_read_byte(struct mtd_info *mtd)
 	/* FIXME: No clue why this is done this way, just mimicking the 4706 variant */
 	case NAND_CMD_STATUS:
 	case NAND_CMD_READOOB:
-		bcm47xxnflash_ops_bcm5357_read(mtd, (u8 *)&tmp, 4);
+		bcm47xxnflash_ops_bcm5357_read_oob(mtd, (u8 *)&tmp, 4);
 		data = tmp & 0xFF;
 		break;
 	default:
@@ -504,12 +599,15 @@ static void bcm47xxnflash_ops_bcm5357_read_buf(struct mtd_info *mtd,
 
 	switch (b47n->curr_command) {
 	case NAND_CMD_READ0:
-	case NAND_CMD_READOOB:
 		bcm47xxnflash_ops_bcm5357_read(mtd, buf, len);
-		return;
-	}
+		break;
+	case NAND_CMD_READOOB:
+		bcm47xxnflash_ops_bcm5357_read_oob(mtd, buf, len);
+		break;
 
-	pr_err("Invalid command for read buf: 0x%X\n", b47n->curr_command);
+	default:
+		pr_err("Invalid command for read buf: 0x%X\n", b47n->curr_command);
+	}
 }
 
 static void bcm47xxnflash_ops_bcm5357_write_buf(struct mtd_info *mtd,
@@ -536,6 +634,7 @@ int bcm47xxnflash_ops_bcm5357_init(struct bcm47xxnflash *b47n)
 	struct bcma_drv_cc *cc = b47n->cc;
 	struct nand_chip *nand_chip = (struct nand_chip *)&b47n->nand_chip;
 	int err;
+	u32 reg;
 
 	pr_info("Initializing bcm5357 NAND controller\n");
 	err = 0;
@@ -547,26 +646,31 @@ int bcm47xxnflash_ops_bcm5357_init(struct bcm47xxnflash *b47n)
 	b47n->nand_chip.read_buf = bcm47xxnflash_ops_bcm5357_read_buf;
 	b47n->nand_chip.write_buf = bcm47xxnflash_ops_bcm5357_write_buf;
         b47n->nand_chip.read_byte = bcm47xxnflash_ops_bcm5357_read_byte;
-        /* b47n->nand_chip.scan_bbt = bcm47xxnflash_ops_bcm5357_scan_bbt; */
 
 	b47n->nand_chip.onfi_set_features = nand_onfi_get_set_features_notsupp;
 	b47n->nand_chip.onfi_get_features = nand_onfi_get_set_features_notsupp;
 
 	/* As per K9F1G08U0D data sheet Rev 0.0 Dec 9 2009, page 13 tR */
 	nand_chip->chip_delay = 35;
+	nand_chip->chip_delay = 50;
+
 	b47n->nand_chip.bbt_options = NAND_BBT_USE_FLASH;
 
 	/* FIXME: Just hoping for the best */
 	b47n->nand_chip.ecc.mode = NAND_ECC_NONE;
 
-	/* FIXME: Must enable ecc configuration here */
+	/* FIXME: Disable read ecc for now */
+	reg = bcma_cc_read32(cc, BCMA_CC_NAND_ACC_CONTROL);
+	reg &= ~NAC_RD_ECC_EN;
+	bcma_cc_write32(cc, BCMA_CC_NAND_ACC_CONTROL, reg);
 
+	/* FIXME: Must enable ecc configuration here */
+	bcm47xxnflash_ops_bcm5357_enable(cc, false);
 	bcm47xxnflash_ops_bcm5357_enable(cc, true);
 
 	/* Scan NAND */
 	pr_err("Scanning nand\n");
 	err = nand_scan(nand_to_mtd(&b47n->nand_chip), 1);
-	pr_err("Page shift is %d\n", b47n->nand_chip.page_shift);
 
 	if (err) {
 		pr_err("Could not scan NAND flash: %d\n", err);
