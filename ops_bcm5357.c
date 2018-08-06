@@ -80,7 +80,7 @@
 /* Below is assumed */
 #define NIST_FLASH_STATUS_ERROR         0x00000001
 
-#define NF_RETRIES	                1000000
+#define NF_RETRIES	                10000
 #define NFL_SECTOR_SIZE			512
 
 #define BCM5357_CMD_DEBUG 1
@@ -120,13 +120,14 @@ static inline u8 bcm47xxnnflash_ops_bcm5357_check_status(struct bcma_drv_cc *cc)
 
 static inline void bcm47xxnflash_ops_bcm5357_calc_and_set_offset(struct bcm47xxnflash *b47n, int page_addr, int column) {
 	/* Do we need to account for spare area? */
-	bcma_cc_write32(b47n->cc, BCMA_CC_NAND_CMD_ADDR, (page_addr << b47n->nand_chip.page_shift + 1) | column);
+        bcma_cc_write32(b47n->cc, BCMA_CC_NAND_CMD_ADDR, (page_addr << (b47n->nand_chip.page_shift + 1)) | column);
 }
 
 static void bcm47xxnflash_ops_bcm5357_enable(struct bcma_drv_cc *cc, bool enable)
 {
 	u32 mask;
 	u32 val;
+	u32 reg;
 
 	mask = ~(BCMA_CHIPCTL_5357_NFLASH);
 	val = 0;
@@ -137,16 +138,16 @@ static void bcm47xxnflash_ops_bcm5357_enable(struct bcma_drv_cc *cc, bool enable
 	bcma_pmu_write32(cc, BCMA_CC_PMU_CHIPCTL_ADDR, 1);
 
 #ifdef BCM5357_CMD_DEBUG
-	val = bcma_pmu_read32(cc, BCMA_CC_PMU_CHIPCTL_DATA);
-	pr_err("Pre enable write: bcm5357_enable: 0x%08x\n", val);
+	reg = bcma_pmu_read32(cc, BCMA_CC_PMU_CHIPCTL_DATA);
+	pr_err("Pre enable write: bcm5357_enable: 0x%08x\n", reg);
 #endif
+
 	bcma_pmu_maskset32(cc, BCMA_CC_PMU_CHIPCTL_DATA, mask, val);
 
 #ifdef BCM5357_CMD_DEBUG
-	val = bcma_pmu_read32(cc, BCMA_CC_PMU_CHIPCTL_DATA);
-	pr_err("Post enable write: bcm5357_enable: 0x%08x\n", val);
+	reg = bcma_pmu_read32(cc, BCMA_CC_PMU_CHIPCTL_DATA);
+	pr_err("Post enable write: bcm5357_enable: 0x%08x\n", reg);
 #endif
-
 }
 
 /* Poll for command completion. Returns zero when complete. */
@@ -167,6 +168,7 @@ static int bcm47xxnflash_ops_bcm5357_poll(struct bcma_drv_cc *cc)
 			pr_err("Flash status error\n");
 			return BRCMNAND_FLASH_STATUS_ERROR;
 		}
+		udelay(1);
 	}
 
 	pr_err("Polling timeout!\n");
@@ -273,9 +275,9 @@ static void bcm47xxnflash_ops_bcm5357_read(struct mtd_info *mtd, uint8_t *buf,
 		}
 
 		if ((bcma_cc_read32(cc, BCMA_CC_NAND_INTFC_STATUS) & NIST_CACHE_VALID) == 0) {
-			if (tries < 3) {
+			if (tries < 10) {
 				tries++;
-				pr_err("Read cache not valid, trying again(%d/3)\n", tries);
+				pr_err("Read cache not valid, trying again (%d/10)\n", tries);
 				continue;
 			} else {
 				pr_err("Read cache not valid, giving up\n");
