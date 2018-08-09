@@ -103,6 +103,63 @@
 /**************************************************
  * Various helpers
  **************************************************/
+static void bcm47xxnflash_ops_bcm5357_dump_regs(struct bcma_drv_cc *cc)
+{
+	pr_err("0x%08x, 0x%08x\n", BCMA_CC_NAND_REVISION, bcma_cc_read32(cc, BCMA_CC_NAND_REVISION));
+	pr_err("0x%08x, 0x%08x\n", BCMA_CC_NAND_CMD_START, bcma_cc_read32(cc, BCMA_CC_NAND_CMD_START));
+	pr_err("0x%08x, 0x%08x\n", BCMA_CC_NAND_CMD_ADDR_X, bcma_cc_read32(cc, BCMA_CC_NAND_CMD_ADDR_X));
+	pr_err("0x%08x, 0x%08x\n", BCMA_CC_NAND_CMD_ADDR, bcma_cc_read32(cc, BCMA_CC_NAND_CMD_ADDR));
+	pr_err("0x%08x, 0x%08x\n", BCMA_CC_NAND_CMD_END_ADDR, bcma_cc_read32(cc, BCMA_CC_NAND_CMD_END_ADDR));
+	pr_err("0x%08x, 0x%08x\n", BCMA_CC_NAND_CS_NAND_SELECT, bcma_cc_read32(cc, BCMA_CC_NAND_CS_NAND_SELECT));
+	pr_err("0x%08x, 0x%08x\n", BCMA_CC_NAND_CS_NAND_XOR, bcma_cc_read32(cc, BCMA_CC_NAND_CS_NAND_XOR));
+	pr_err("0x%08x, 0x%08x\n", BCMA_CC_NAND_SPARE_RD0, bcma_cc_read32(cc, BCMA_CC_NAND_SPARE_RD0));
+	pr_err("0x%08x, 0x%08x\n", BCMA_CC_NAND_SPARE_RD4, bcma_cc_read32(cc, BCMA_CC_NAND_SPARE_RD4));
+	pr_err("0x%08x, 0x%08x\n", BCMA_CC_NAND_SPARE_RD8, bcma_cc_read32(cc, BCMA_CC_NAND_SPARE_RD8));
+	pr_err("0x%08x, 0x%08x\n", BCMA_CC_NAND_SPARE_RD12, bcma_cc_read32(cc, BCMA_CC_NAND_SPARE_RD12));
+	pr_err("0x%08x, 0x%08x\n", BCMA_CC_NAND_SPARE_WR0, bcma_cc_read32(cc, BCMA_CC_NAND_SPARE_WR0));
+	pr_err("0x%08x, 0x%08x\n", BCMA_CC_NAND_SPARE_WR4, bcma_cc_read32(cc, BCMA_CC_NAND_SPARE_WR4));
+	pr_err("0x%08x, 0x%08x\n", BCMA_CC_NAND_SPARE_WR8, bcma_cc_read32(cc, BCMA_CC_NAND_SPARE_WR8));
+	pr_err("0x%08x, 0x%08x\n", BCMA_CC_NAND_SPARE_WR12, bcma_cc_read32(cc, BCMA_CC_NAND_SPARE_WR12));
+	pr_err("0x%08x, 0x%08x\n", BCMA_CC_NAND_ACC_CONTROL, bcma_cc_read32(cc, BCMA_CC_NAND_ACC_CONTROL));
+	pr_err("0x%08x, 0x%08x\n", BCMA_CC_NAND_CONFIG, bcma_cc_read32(cc, BCMA_CC_NAND_CONFIG));
+	pr_err("0x%08x, 0x%08x\n", BCMA_CC_NAND_TIMING_1, bcma_cc_read32(cc, BCMA_CC_NAND_TIMING_1));
+	pr_err("0x%08x, 0x%08x\n", BCMA_CC_NAND_TIMING_2, bcma_cc_read32(cc, BCMA_CC_NAND_TIMING_2));
+	pr_err("0x%08x, 0x%08x\n", BCMA_CC_NAND_SEMAPHORE, bcma_cc_read32(cc, BCMA_CC_NAND_SEMAPHORE));
+	pr_err("0x%08x, 0x%08x\n", BCMA_CC_NAND_DEVID, bcma_cc_read32(cc, BCMA_CC_NAND_DEVID));
+	pr_err("0x%08x, 0x%08x\n", BCMA_CC_NAND_DEVID_X, bcma_cc_read32(cc, BCMA_CC_NAND_DEVID_X));
+	pr_err("0x%08x, 0x%08x\n", BCMA_CC_NAND_BLOCK_LOCK_STATUS, bcma_cc_read32(cc, BCMA_CC_NAND_BLOCK_LOCK_STATUS));
+	pr_err("0x%08x, 0x%08x\n", BCMA_CC_NAND_INTFC_STATUS, bcma_cc_read32(cc, BCMA_CC_NAND_INTFC_STATUS));
+	pr_err("0x%08x, 0x%08x\n", BCMA_CC_NAND_ECC_CORR_ADDR_X, bcma_cc_read32(cc, BCMA_CC_NAND_ECC_CORR_ADDR_X));
+	pr_err("0x%08x, 0x%08x\n", BCMA_CC_NAND_ECC_CORR_ADDR, bcma_cc_read32(cc, BCMA_CC_NAND_ECC_CORR_ADDR));
+	pr_err("0x%08x, 0x%08x\n", BCMA_CC_NAND_ECC_UNC_ADDR_X, bcma_cc_read32(cc, BCMA_CC_NAND_ECC_UNC_ADDR_X));
+	pr_err("0x%08x, 0x%08x\n", BCMA_CC_NAND_ECC_UNC_ADDR, bcma_cc_read32(cc, BCMA_CC_NAND_ECC_UNC_ADDR));
+	pr_err("0x%08x, 0x%08x\n", BCMA_CC_NAND_READ_ERROR_COUNT, bcma_cc_read32(cc, BCMA_CC_NAND_READ_ERROR_COUNT));
+	pr_err("0x%08x, 0x%08x\n", BCMA_CC_NAND_CORR_STAT_THRESHOLD, bcma_cc_read32(cc, BCMA_CC_NAND_CORR_STAT_THRESHOLD));
+	pr_err("0x%08x, 0x%08x\n", BCMA_CC_NAND_READ_ADDR_X, bcma_cc_read32(cc, BCMA_CC_NAND_READ_ADDR_X));
+	pr_err("0x%08x, 0x%08x\n", BCMA_CC_NAND_READ_ADDR, bcma_cc_read32(cc, BCMA_CC_NAND_READ_ADDR));
+	pr_err("0x%08x, 0x%08x\n", BCMA_CC_NAND_PAGE_PROGRAM_ADDR_X, bcma_cc_read32(cc, BCMA_CC_NAND_PAGE_PROGRAM_ADDR_X));
+	pr_err("0x%08x, 0x%08x\n", BCMA_CC_NAND_PAGE_PROGRAM_ADDR, bcma_cc_read32(cc, BCMA_CC_NAND_PAGE_PROGRAM_ADDR));
+	pr_err("0x%08x, 0x%08x\n", BCMA_CC_NAND_COPY_BACK_ADDR_X, bcma_cc_read32(cc, BCMA_CC_NAND_COPY_BACK_ADDR_X));
+	pr_err("0x%08x, 0x%08x\n", BCMA_CC_NAND_COPY_BACK_ADDR, bcma_cc_read32(cc, BCMA_CC_NAND_COPY_BACK_ADDR));
+	pr_err("0x%08x, 0x%08x\n", BCMA_CC_NAND_BLOCK_ERASE_ADDR_X, bcma_cc_read32(cc, BCMA_CC_NAND_BLOCK_ERASE_ADDR_X));
+	pr_err("0x%08x, 0x%08x\n", BCMA_CC_NAND_BLOCK_ERASE_ADDR, bcma_cc_read32(cc, BCMA_CC_NAND_BLOCK_ERASE_ADDR));
+	pr_err("0x%08x, 0x%08x\n", BCMA_CC_NAND_INV_READ_ADDR_X, bcma_cc_read32(cc, BCMA_CC_NAND_INV_READ_ADDR_X));
+	pr_err("0x%08x, 0x%08x\n", BCMA_CC_NAND_INV_READ_ADDR, bcma_cc_read32(cc, BCMA_CC_NAND_INV_READ_ADDR));
+	pr_err("0x%08x, 0x%08x\n", BCMA_CC_NAND_BLK_WR_PROTECT, bcma_cc_read32(cc, BCMA_CC_NAND_BLK_WR_PROTECT));
+	pr_err("0x%08x, 0x%08x\n", BCMA_CC_NAND_ACC_CONTROL_CS1, bcma_cc_read32(cc, BCMA_CC_NAND_ACC_CONTROL_CS1));
+	pr_err("0x%08x, 0x%08x\n", BCMA_CC_NAND_CONFIG_CS1, bcma_cc_read32(cc, BCMA_CC_NAND_CONFIG_CS1));
+	pr_err("0x%08x, 0x%08x\n", BCMA_CC_NAND_TIMING_1_CS1, bcma_cc_read32(cc, BCMA_CC_NAND_TIMING_1_CS1));
+	pr_err("0x%08x, 0x%08x\n", BCMA_CC_NAND_TIMING_2_CS1, bcma_cc_read32(cc, BCMA_CC_NAND_TIMING_2_CS1));
+	pr_err("0x%08x, 0x%08x\n", BCMA_CC_NAND_SPARE_RD16, bcma_cc_read32(cc, BCMA_CC_NAND_SPARE_RD16));
+	pr_err("0x%08x, 0x%08x\n", BCMA_CC_NAND_SPARE_RD20, bcma_cc_read32(cc, BCMA_CC_NAND_SPARE_RD20));
+	pr_err("0x%08x, 0x%08x\n", BCMA_CC_NAND_SPARE_RD24, bcma_cc_read32(cc, BCMA_CC_NAND_SPARE_RD24));
+	pr_err("0x%08x, 0x%08x\n", BCMA_CC_NAND_SPARE_RD28, bcma_cc_read32(cc, BCMA_CC_NAND_SPARE_RD28));
+	pr_err("0x%08x, 0x%08x\n", BCMA_CC_NAND_CACHE_ADDR, bcma_cc_read32(cc, BCMA_CC_NAND_CACHE_ADDR));
+	pr_err("0x%08x, 0x%08x\n", BCMA_CC_NAND_CACHE_DATA, bcma_cc_read32(cc, BCMA_CC_NAND_CACHE_DATA));
+	pr_err("0x%08x, 0x%08x\n", BCMA_CC_NAND_CTRL_CONFIG, bcma_cc_read32(cc, BCMA_CC_NAND_CTRL_CONFIG));
+	pr_err("0x%08x, 0x%08x\n", BCMA_CC_NAND_CTRL_STATUS, bcma_cc_read32(cc, BCMA_CC_NAND_CTRL_STATUS));
+}
+
 static inline int bcm47xxnflash_ops_bcm5357_ctl_cmd(struct bcma_drv_cc *cc, u32 code)
 {
 	bcma_cc_write32(cc, BCMA_CC_NAND_CMD_START, code);
@@ -231,7 +288,7 @@ static void bcm47xxnflash_ops_bcm5357_read(struct mtd_info *mtd, uint8_t *buf,
 
 	u32 offset;
 	u32 *buf32;
-	int i, j;
+	int i;
 	int toread;
 	/* u32 reg; */
 	u32 mask;
@@ -240,23 +297,20 @@ static void bcm47xxnflash_ops_bcm5357_read(struct mtd_info *mtd, uint8_t *buf,
 	buf32 = (u32 *) buf;
 	offset = (b47n->curr_page_addr << (b47n->nand_chip.page_shift + 1)) | b47n->curr_column;
 
-#ifdef BCM5357_CMD_DEBUG
-	pr_err("bcm5357_read, offset: 0x%08x, len: %d\n", offset, len);
-#endif
+/* #ifdef BCM5357_CMD_DEBUG */
+/* 	pr_err("bcm5357_read, offset: 0x%08x, len: %d\n", offset, len); */
+/* #endif */
 
 	if (offset & mask) {
 		pr_err("bcm5357: Tried perform a non-aligned read\n");
 		return;
 	}
 
-	/* bcma_cc_write32(cc, BCMA_CC_NAND_CMD_ADDR_X, 0); */
 
-/* #define offset_min 0x00000000 */
-/* #define offset_max 0x03FFFF00 */
 	offset = 0x00500000;
-/* 	for (j = offset_min; j <= offset_max; j += NFL_SECTOR_SIZE) { */
+
 	while (len > 0) {
-		bcma_cc_write32(cc, BCMA_CC_NAND_CMD_ADDR, j);
+		bcma_cc_write32(cc, BCMA_CC_NAND_CMD_ADDR, offset);
 
 		__sync();
 		bcm47xxnflash_ops_bcm5357_ctl_cmd(cc, NCMD_PAGE_RD);
@@ -265,26 +319,21 @@ static void bcm47xxnflash_ops_bcm5357_read(struct mtd_info *mtd, uint8_t *buf,
 			break;
 		}
 
-		/* FIXME: Can this be omitted and moved to the init part of the function? */
-		/* Maybe omit? */
-		/* bcma_cc_write32(cc, BCMA_CC_NAND_CACHE_ADDR, 0); */
+		bcma_cc_write32(cc, BCMA_CC_NAND_CACHE_ADDR, 0);
 
 		__sync();
 		/* PIO Read, is DMA possible? Maybe not worth it if one only can read out 512 bytes in one go */
 		toread = min(len, NFL_SECTOR_SIZE);
 		for (i = 0; i < toread; i += sizeof(buf32), buf32++) {
 			*buf32 = bcma_cc_read32(cc, BCMA_CC_NAND_CACHE_DATA);
-#ifdef BCM5357_DATA_DEBUG
-			if (i == 0) {
-				/* reg = bcma_cc_read32(cc, BCMA_CC_NAND_CACHE_ADDR); */
-				/* pr_err("bcm5357_read, addr: 0x%08x, cache addr: 0x%08x, 0x%08x\n", offset + i, reg, */
-			        pr_err("bcm5357_read, addr: 0x%08x, 0x%08x\n", offset + i, *buf32);
-			}
-#endif
+/* #ifdef BCM5357_DATA_DEBUG */
+/* 			pr_err("bcm5357_read: A: 0x%08x, 0x%08x\n", offset + i, *buf32); */
+/* #endif */
 		}
 		len -= toread;
 		offset += toread;
 	}
+	/* bcm47xxnflash_ops_bcm5357_dump_regs(cc); */
 
 }
 
@@ -495,17 +544,14 @@ static void bcm47xxnflash_ops_bcm5357_cmdfunc(struct mtd_info *mtd,
 		if (column >= mtd->writesize) {
 			/* OOB area */
 			column -= mtd->writesize;
-			bcm47xxnflash_ops_bcm5357_ctl_cmd(cc, NAND_CMD_READOOB);
-		} else if (column < 256) {
-			/* First 256 bytes --> READ0 */
-			bcm47xxnflash_ops_bcm5357_ctl_cmd(cc, NAND_CMD_READ0);
+
+                        if (bcm47xxnflash_ops_bcm5357_ctl_cmd(cc, NAND_CMD_READOOB) < 0) {
+			           pr_err("SEQIN, READ00B failed\n");
+                        }
 		} else {
-			column -= 256;
-			bcm47xxnflash_ops_bcm5357_ctl_cmd(cc, NAND_CMD_READ1);
-		}
-		bcm47xxnflash_ops_bcm5357_ctl_cmd(cc, NCMD_BLOCK_ERASE);
-		if (bcm47xxnflash_ops_bcm5357_poll(cc, 0) < 0) {
-			pr_err("SEQIN failed\n");
+	                if (bcm47xxnflash_ops_bcm5357_ctl_cmd(cc, NAND_CMD_READ0) < 0) {
+			           pr_err("SEQIN, READ failed\n");
+                        }
 		}
 		break;
 	case NAND_CMD_PAGEPROG:
@@ -609,6 +655,7 @@ int bcm47xxnflash_ops_bcm5357_init(struct bcm47xxnflash *b47n)
 	struct nand_chip *nand_chip = (struct nand_chip *)&b47n->nand_chip;
 	int err;
 	u32 reg;
+	int i;
 
 	pr_info("Initializing bcm5357 NAND controller\n");
 	err = 0;
@@ -639,8 +686,15 @@ int bcm47xxnflash_ops_bcm5357_init(struct bcm47xxnflash *b47n)
 	/* bcma_cc_write32(cc, BCMA_CC_NAND_ACC_CONTROL, reg); */
 
 	/* FIXME: Must enable ecc configuration here */
-	bcm47xxnflash_ops_bcm5357_enable(cc, false);
-	bcm47xxnflash_ops_bcm5357_enable(cc, true);
+	/* bcm47xxnflash_ops_bcm5357_enable(cc, false); */
+	/* bcm47xxnflash_ops_bcm5357_enable(cc, true); */
+
+	/* bcm47xxnflash_ops_bcm5357_dump_regs(cc); */
+
+	/* for (i = 0; i < 0xFFFF; i += 4) { */
+	/* 	reg = bcma_cc_read32(cc, i); */
+	/* 	pr_err("0x%08X, 0x%08x\n", i, reg); */
+        /* } */
 
 	/* Scan NAND */
 	pr_err("Scanning nand\n");
