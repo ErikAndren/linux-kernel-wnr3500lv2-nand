@@ -84,7 +84,8 @@
 #define NFL_SECTOR_SIZE			512
 
 #define BCM5357_CMD_DEBUG 1
-#define BCM5357_DATA_DEBUG 0
+//#define BCM5357_DATA_DEBUG 0
+//#define BCM5357_NAND_ENABLE_DEBUG
 
 #define BRCMNAND_FLASH_STATUS_ERROR         (-2)
 #define BRCMNAND_TIMED_OUT                  (-3)
@@ -185,7 +186,7 @@ static void bcm47xxnflash_ops_bcm5357_enable(struct bcma_drv_cc *cc, bool enable
 	val = 0;
 	if (enable) {
 		val = BCMA_CHIPCTL_5357_NFLASH;
-#ifdef BCM5357_CMD_DEBUG
+#ifdef BCM5357_NAND_ENABLE_DEBUG
 		pr_err("Enabling BCM5357 NAND flash\n");
 	} else {
 		pr_err("Disabling BCM5357 NAND flash\n");
@@ -243,11 +244,10 @@ static void bcm47xxnflash_ops_bcm5357_read_oob(struct mtd_info *mtd, uint8_t *bu
 	pr_err("bcm5357_read_oob, offset: 0x%08x, len: %d\n", offset, len);
 #endif
 
-	bcm47xxnflash_ops_bcm5357_enable(cc, true);
 	mutex_lock(&b47n->cmd_l);
+	bcm47xxnflash_ops_bcm5357_enable(cc, true);
 
 	while (len > 0) {
-		bcma_cc_write32(cc, BCMA_CC_NAND_CMD_ADDR_X, 0);
 		bcma_cc_write32(cc, BCMA_CC_NAND_CMD_ADDR, offset);
 
 		__sync();
@@ -299,15 +299,13 @@ static void bcm47xxnflash_ops_bcm5357_read(struct mtd_info *mtd, uint8_t *buf,
 	pr_err("bcm5357_read command, offset: 0x%08x, len: %d\n", offset, len);
 #endif
 
-	bcm47xxnflash_ops_bcm5357_enable(cc, true);
 	mutex_lock(&b47n->cmd_l);
+	bcm47xxnflash_ops_bcm5357_enable(cc, true);
 
 	if (offset & mask) {
 		pr_err("bcm5357: Tried perform a non-aligned read\n");
 		return;
 	}
-
-	offset = 0x00500000;
 
 	while (len > 0) {
 		toread = min(len, NFL_SECTOR_SIZE);
@@ -332,6 +330,8 @@ static void bcm47xxnflash_ops_bcm5357_read(struct mtd_info *mtd, uint8_t *buf,
 
 		/* Awful hack, but sometimes reads fail for unknown reason, just repeat for now */
 		if (*buf32 == 0x3c12b800) {
+			printk("Read failed, interface status: 0x%08x\n", bcma_cc_read32(cc, BCMA_CC_NAND_INTFC_STATUS));
+
 			/* pr_err("Read failed, retrying\n"); */
 			continue;
 		}
@@ -379,8 +379,8 @@ static void bcm47xxnflash_ops_bcm5357_write(struct mtd_info *mtd,
 	pr_err("bcm5357_write, offset: 0x%08llx, len: %d\n", offset, len);
 #endif
 
-	bcm47xxnflash_ops_bcm5357_enable(cc, true);
 	mutex_lock(&b47n->cmd_l);
+	bcm47xxnflash_ops_bcm5357_enable(cc, true);
 
 	/* Disable partial page programming */
 	reg = bcma_cc_read32(cc, BCMA_CC_NAND_ACC_CONTROL);
@@ -478,8 +478,8 @@ static void bcm47xxnflash_ops_bcm5357_cmdfunc(struct mtd_info *mtd,
 	struct bcma_drv_cc *cc = b47n->cc;
 	u32 reg;
 
-	bcm47xxnflash_ops_bcm5357_enable(cc, true);
 	mutex_lock(&b47n->cmd_l);
+	bcm47xxnflash_ops_bcm5357_enable(cc, true);
 
 	b47n->curr_command = command;
 
