@@ -8,6 +8,7 @@
 
 #include <linux/mtd/mtd.h>
 #include <linux/mtd/rawnand.h>
+#include <linux/mutex.h>
 
 struct bcm47xxnflash {
 	struct bcma_drv_cc *cc;
@@ -19,6 +20,8 @@ struct bcm47xxnflash {
 	int curr_column;
 
 	u8 id_data[8];
+
+	struct mutex cmd_l;
 };
 
 int bcm47xxnflash_ops_bcm4706_init(struct bcm47xxnflash *b47n);
