@@ -307,13 +307,19 @@ static void bcm47xxnflash_ops_bcm5357_read(struct mtd_info *mtd, uint8_t *buf,
 	pr_err("bcm5357_read command, offset: 0x%08x, len: %d\n", offset, len);
 #endif
 
+	if (offset & mask) {
+		pr_err("Tried perform a non-aligned read\n");
+		return;
+	}
+
+	if (len & mask) {
+		pr_err("Tried to read an illegal length\n");
+		return;
+	}
+
 	mutex_lock(&b47n->cmd_l);
 	bcm47xxnflash_ops_bcm5357_enable(cc, true);
 
-	if (offset & mask) {
-		pr_err("bcm5357: Tried perform a non-aligned read\n");
-		return;
-	}
 
 	while (len > 0) {
 		toread = min(len, NFL_SECTOR_SIZE);
