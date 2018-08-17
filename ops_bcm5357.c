@@ -22,6 +22,7 @@
 #define NCMD_NULL			0
 #define NCMD_PAGE_RD			1
 #define NCMD_SPARE_RD			2
+/* Used to update the INTFC register */
 #define NCMD_STATUS_RD			3
 #define NCMD_PAGE_PROG			4
 #define NCMD_SPARE_PROG			5
@@ -73,6 +74,8 @@
 #define NAC_SPARE_SIZE_SHIFT            0
 
 /* nand_intfc_status */
+/* What is the difference between ctrl and flash ready? */
+/* Current hypothesis is that ctrl ready means that flash is ready for a new command */
 #define	NIST_CTRL_READY			0x80000000
 #define	NIST_FLASH_READY		0x40000000
 #define	NIST_CACHE_VALID		0x20000000
@@ -82,12 +85,13 @@
 /* Below is assumed */
 #define NIST_FLASH_STATUS_ERROR         0x00000001
 
-#define NF_RETRIES	                10000
+#define NF_RETRIES	                100000
 #define NFL_SECTOR_SIZE			512
 
 #define BCM5357_CMD_DEBUG 1
 #define BCM5357_DATA_DEBUG 0
 #define BCM5357_NAND_ENABLE_DEBUG 0
+#define BCM5357_POLL_DEBUG 0
 
 #define BRCMNAND_FLASH_STATUS_ERROR         (-2)
 #define BRCMNAND_TIMED_OUT                  (-3)
@@ -204,10 +208,14 @@ static int bcm47xxnflash_ops_bcm5357_poll(struct bcma_drv_cc *cc, u32 pollmask)
 	pollmask |= NIST_CTRL_READY | NIST_FLASH_READY;
 
 	for (i = 0; i < NF_RETRIES; i++) {
-		/* FIXME: My current understanding is that the CTRL_READY, FLASH_READY, CACHE_VALID registers never go low, this means that we will be way to aggressive when reading data from the FLASH. */
-		udelay(100000);
+		/* Current understanding is that this command will update the NAND_INTFC_STATUS register */
+		bcm47xxnflash_ops_bcm5357_ctl_cmd(cc, NCMD_STATUS_RD);
 
 		val = bcma_cc_read32(cc, BCMA_CC_NAND_INTFC_STATUS);
+
+#if BCM5357_POLL_DEBUG == 1
+		pr_err("INTFC_ST: 0x%08x\n", val);
+#endif
 
 		if (val & NIST_FLASH_STATUS_ERROR) {
 			pr_err("Flash status error\n");
@@ -217,9 +225,10 @@ static int bcm47xxnflash_ops_bcm5357_poll(struct bcma_drv_cc *cc, u32 pollmask)
 		if ((val & pollmask) == pollmask) {
 			return 0;
 		}
+		udelay(1000);
 	}
 
-	pr_err("Polling timeout!\n");
+	pr_err("Polling timeout, Intfc status: 0x%08x\n", val);
 	return BRCMNAND_TIMED_OUT;
 }
 
@@ -296,7 +305,7 @@ static void bcm47xxnflash_ops_bcm5357_read(struct mtd_info *mtd, uint8_t *buf,
 	stuck = 0;
 	mask = NFL_SECTOR_SIZE - 1;
 	buf32 = (u32 *) buf;
-	offset = (b47n->curr_page_addr << (b47n->nand_chip.page_shift)) | b47n->curr_column;
+	offset = (b47n->curr_page_addr << (nand_chip->page_shift)) | b47n->curr_column;
 
 #if BCM5357_CMD_DEBUG == 1
 	pr_err("bcm5357_read command, offset: 0x%08x, len: %d\n", offset, len);
@@ -315,24 +324,27 @@ static void bcm47xxnflash_ops_bcm5357_read(struct mtd_info *mtd, uint8_t *buf,
 	mutex_lock(&b47n->cmd_l);
 	bcm47xxnflash_ops_bcm5357_enable(cc, true);
 
+
 	bcma_cc_write32(cc, BCMA_CC_NAND_CACHE_ADDR, 0);
 
 	while (len > 0) {
-		toread = min(len, NFL_SECTOR_SIZE);
+		if (bcm47xxnflash_ops_bcm5357_poll(cc, 0) < 0) {
+			panic("Device not ready to read\n");
+		}
+
+	       toread = min(len, NFL_SECTOR_SIZE);
 
 #if BCM5357_DATA_DEBUG == 1
 		pr_err("New read, offset: 0x%08x, toread: %d\n", offset, toread);
 #endif
 		bcma_cc_write32(cc, BCMA_CC_NAND_CMD_ADDR, offset);
-
-		__sync();
 		bcm47xxnflash_ops_bcm5357_ctl_cmd(cc, NCMD_PAGE_RD);
+		udelay(nand_chip->chip_delay);
+
 		if (bcm47xxnflash_ops_bcm5357_poll(cc, NIST_CACHE_VALID) < 0) {
-			pr_err("Failed PAGE_RD\n");
+			panic("Failed PAGE_RD\n");
 			break;
 		}
-
-		__sync();
 
 		*buf32 = bcma_cc_read32(cc, BCMA_CC_NAND_CACHE_DATA);
 
@@ -343,13 +355,17 @@ static void bcm47xxnflash_ops_bcm5357_read(struct mtd_info *mtd, uint8_t *buf,
 
 			/* pr_err("Read failed, retrying\n"); */
 			stuck++;
-			if (stuck == 1000) {
-				/* FIXME: Do a flash reset */
-				pr_err("Read got stuck for real. Reg dump:\n");
-				bcm47xxnflash_ops_bcm5357_dump_regs(cc);
+			if (stuck > 10) {
+				panic("Read is stuck\n");
 
-				__sync();
-				panic("Reg dump done\n");
+				/* FIXME: Do a flash reset */
+				bcm47xxnflash_ops_bcm5357_ctl_cmd(cc, NCMD_FLASH_RESET);
+				if (bcm47xxnflash_ops_bcm5357_poll(cc, 0) < 0) {
+					pr_err("Read got stuck for real. Reg dump:\n");
+					bcm47xxnflash_ops_bcm5357_dump_regs(cc);
+					panic("Reg dump done\n");
+				}
+				stuck = 0;
 			}
 			continue;
 		}
@@ -465,6 +481,10 @@ static int bcm47xxnflash_ops_bcm5357_dev_ready(struct mtd_info *mtd)
 	struct bcma_drv_cc *cc = b47n->cc;
 
 	u32 val;
+
+	bcm47xxnflash_ops_bcm5357_ctl_cmd(cc, NCMD_STATUS_RD);
+
+
 
 	val = bcma_cc_read32(cc, BCMA_CC_NAND_INTFC_STATUS);
 
@@ -726,7 +746,6 @@ int bcm47xxnflash_ops_bcm5357_init(struct bcm47xxnflash *b47n)
 
 	/* As per K9F1G08U0D data sheet Rev 0.0 Dec 9 2009, page 13 tR */
 	nand_chip->chip_delay = 35;
-	nand_chip->chip_delay = 50;
 
 	b47n->nand_chip.bbt_options = NAND_BBT_USE_FLASH;
 
