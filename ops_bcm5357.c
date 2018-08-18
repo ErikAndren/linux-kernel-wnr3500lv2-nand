@@ -692,16 +692,19 @@ static u8 bcm47xxnflash_ops_bcm5357_read_byte(struct mtd_info *mtd)
 		break;
 
 	case NAND_CMD_STATUS:
-#if BCM5357_CMD_DEBUG
-		pr_err("bcm5357_read_byte, NAND_CMD_STATUS\n");
-#endif
-
 		/* TODO: Add write protect bit checking routine */
-		if (bcm47xxnflash_ops_bcm5357_poll(cc, 0)) {
+		/* NAND_STATUS_WP is active low */
+		data = NAND_STATUS_WP;
+		if (bcm47xxnflash_ops_bcm5357_poll(cc, 0) == 0) {
 			data |= NAND_STATUS_READY;
 		} else {
 			data |= NAND_STATUS_FAIL;
 		}
+
+#if BCM5357_CMD_DEBUG
+		pr_err("bcm5357_read_byte, NAND_CMD_STATUS: 0x%02x\n", data);
+#endif
+
 		break;
 
 	case NAND_CMD_READOOB:
