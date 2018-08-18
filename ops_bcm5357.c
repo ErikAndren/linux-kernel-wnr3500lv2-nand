@@ -248,7 +248,8 @@ static void bcm47xxnflash_ops_bcm5357_read_oob(struct mtd_info *mtd, uint8_t *bu
 	int toread;
 
 	buf32 = (u32 *) buf;
-	offset = (b47n->curr_page_addr << (b47n->nand_chip.page_shift)) | b47n->curr_column;
+
+	offset = b47n->curr_page_addr << nand_chip->page_shift;
 
 #if BCM5357_CMD_DEBUG == 1
 	pr_err("bcm5357_read_oob, offset: 0x%08x, len: %d\n", offset, len);
@@ -323,7 +324,6 @@ static void bcm47xxnflash_ops_bcm5357_read(struct mtd_info *mtd, uint8_t *buf,
 
 	mutex_lock(&b47n->cmd_l);
 	bcm47xxnflash_ops_bcm5357_enable(cc, true);
-
 
 	bcma_cc_write32(cc, BCMA_CC_NAND_CACHE_ADDR, 0);
 
@@ -402,7 +402,7 @@ static void bcm47xxnflash_ops_bcm5357_write(struct mtd_info *mtd,
 	int towrite;
 	u64 offset;
 
-        offset = (b47n->curr_page_addr << (b47n->nand_chip.page_shift)) | b47n->curr_column;
+        offset = (b47n->curr_page_addr << (nand_chip->page_shift)) | b47n->curr_column;
 	from = (u32 *) buf;
 
 #if BCM5357_CMD_DEBUG == 1
@@ -484,8 +484,6 @@ static int bcm47xxnflash_ops_bcm5357_dev_ready(struct mtd_info *mtd)
 
 	bcm47xxnflash_ops_bcm5357_ctl_cmd(cc, NCMD_STATUS_RD);
 
-
-
 	val = bcma_cc_read32(cc, BCMA_CC_NAND_INTFC_STATUS);
 
 	if ((val & (NIST_CTRL_READY | NIST_FLASH_READY)) ==
@@ -501,6 +499,37 @@ static int bcm47xxnflash_ops_bcm5357_dev_ready(struct mtd_info *mtd)
 #endif
 
         return 0;
+}
+
+static void bcm47xxnflash_ops_bcm5357_erase(struct mtd_info *mtd,
+					   int column,
+					   int page_addr)
+{
+	u32 block_mask;
+	struct nand_chip *nand_chip = mtd_to_nand(mtd);
+	struct bcm47xxnflash *b47n = nand_get_controller_data(nand_chip);
+	struct bcma_drv_cc *cc = b47n->cc;
+
+	if (column != -1) {
+		pr_err("Column address not 0 when trying to erase\n");
+		return;
+	}
+
+	block_mask = nand_chip->phys_erase_shift - 1;
+
+	if ((page_addr & block_mask) > 0) {
+		pr_err("Page address is not aligned to block start when erasing\n");
+		return;
+	}
+
+        bcma_cc_write32(cc, BCMA_CC_NAND_CMD_ADDR, page_addr << nand_chip->page_shift);
+
+	panic("Tried to erase block: %d\n", page_addr << nand_chip->page_shift);
+	/* bcm47xxnflash_ops_bcm5357_ctl_cmd(cc, NCMD_BLOCK_ERASE); */
+
+	if (bcm47xxnflash_ops_bcm5357_poll(cc, 0) < 0) {
+		pr_err("Failed to erase block: %d\n", page_addr << nand_chip->page_shift);
+	}
 }
 
 static void bcm47xxnflash_ops_bcm5357_cmdfunc(struct mtd_info *mtd,
@@ -548,25 +577,22 @@ static void bcm47xxnflash_ops_bcm5357_cmdfunc(struct mtd_info *mtd,
 		reg = bcma_cc_read32(cc, BCMA_CC_NAND_DEVID);
 		memcpy(b47n->id_data, &reg, sizeof(reg));
 #if BCM5357_CMD_DEBUG
-		pr_err("bcm5357_cmdfunc, NAND_CMD_READ_BYTE, DEVID: 0x%08x\n", reg);
+		pr_err("bcm5357_cmdfunc, NAND_CMD_READID, DEVID: 0x%08x\n", reg);
 #endif
 
 	        reg = bcma_cc_read32(cc, BCMA_CC_NAND_DEVID_X);
 #if BCM5357_CMD_DEBUG
-		pr_err("bcm5357_cmdfunc, NAND_CMD_READ_BYTE, DEVID_X: 0x%08x\n", reg);
+		pr_err("bcm5357_cmdfunc, NAND_CMD_READID, DEVID_X: 0x%08x\n", reg);
 #endif
 
 		memcpy(b47n->id_data + sizeof(reg), &reg, sizeof(reg));
 		break;
+
 	case NAND_CMD_STATUS:
 #if BCM5357_CMD_DEBUG
 		pr_err("bcm5357_cmdfunc, NAND_CMD_STATUS, col: %d, page: %d\n", column, page_addr);
 #endif
 		bcm47xxnflash_ops_bcm5357_ctl_cmd(cc, NCMD_STATUS_RD);
-		if (bcm47xxnflash_ops_bcm5357_poll(cc, 0) < 0) {
-			pr_err("Failed STATUS_RD cmd\n");
-		}
-
 		break;
 	case NAND_CMD_READ0:
 #if BCM5357_CMD_DEBUG
@@ -582,25 +608,15 @@ static void bcm47xxnflash_ops_bcm5357_cmdfunc(struct mtd_info *mtd,
 
 		break;
 	case NAND_CMD_ERASE1:
-
 #if BCM5357_CMD_DEBUG
 		pr_err("bcm5357_cmdfunc, NAND_CMD_ERASE1, col: %d, page: %d\n", column, page_addr);
 #endif
-
-		/* FIXME: Do we need to check for non block aligned offsets */
-		bcm47xxnflash_ops_bcm5357_calc_and_set_offset(b47n, page_addr, column);
-                pr_err("BLOCK_ERASE disabled for now\n");
-
-                /* bcm47xxnflash_ops_bcm5357_ctl_cmd(cc, NCMD_BLOCK_ERASE); */
-
-		if (bcm47xxnflash_ops_bcm5357_poll(cc, 0) < 0) {
-			pr_err("Failed BLOCK_ERASE cmd\n");
-		}
+		bcm47xxnflash_ops_bcm5357_erase(mtd, column, page_addr);
+		break;
 
 	case NAND_CMD_ERASE2:
 		break;
 	case NAND_CMD_SEQIN:
-
 #if BCM5357_CMD_DEBUG
 		pr_err("bcm5357_cmdfunc, NAND_CMD_SEQIN, col: %d, page: %d\n", column, page_addr);
 #endif
@@ -609,9 +625,6 @@ static void bcm47xxnflash_ops_bcm5357_cmdfunc(struct mtd_info *mtd,
 
 		/* FIXME: Double check this */
 		if (column >= mtd->writesize) {
-			/* OOB area */
-			/* column -= mtd->writesize; */
-
                         if (bcm47xxnflash_ops_bcm5357_ctl_cmd(cc, NAND_CMD_READOOB) < 0) {
 			           pr_err("SEQIN, READ00B failed\n");
                         }
@@ -649,12 +662,10 @@ static u8 bcm47xxnflash_ops_bcm5357_read_byte(struct mtd_info *mtd)
 {
 	struct nand_chip *nand_chip = mtd_to_nand(mtd);
 	struct bcm47xxnflash *b47n = nand_get_controller_data(nand_chip);
+	struct bcma_drv_cc *cc = b47n->cc;
+
 	u8 data;
 	u32 tmp;
-
-#if BCM5357_CMD_DEBUG
-	pr_err("bcm5357_read_byte, NAND_CMD_READ_BYTE, curr_command: 0x%x\n", b47n->curr_command);
-#endif
 
 	data = 0;
 	switch (b47n->curr_command) {
@@ -666,15 +677,30 @@ static u8 bcm47xxnflash_ops_bcm5357_read_byte(struct mtd_info *mtd)
 		}
 		data = b47n->id_data[b47n->curr_column++];
 #if BCM5357_CMD_DEBUG == 1
-		pr_err("bcm5357_read_byte, NAND_CMD_READ_BYTE, read col: %d, data: 0x%02x\n", b47n->curr_column -1, data);
+		pr_err("bcm5357_read_byte, NAND_CMD_READID, read col: %d, data: 0x%02x\n", b47n->curr_column-1, data);
 #endif
 		break;
 
-	/* FIXME: No clue why this is done this way, just mimicking the 4706 variant */
 	case NAND_CMD_STATUS:
+#if BCM5357_CMD_DEBUG
+		pr_err("bcm5357_read_byte, NAND_CMD_STATUS\n");
+#endif
+
+		/* TODO: Add write protect bit checking routine */
+		if (bcm47xxnflash_ops_bcm5357_poll(cc, 0)) {
+			data |= NAND_STATUS_READY;
+		} else {
+			data |= NAND_STATUS_FAIL;
+		}
+		break;
+
 	case NAND_CMD_READOOB:
 		bcm47xxnflash_ops_bcm5357_read_oob(mtd, (u8 *)&tmp, 4);
 		data = tmp & 0xFF;
+#if BCM5357_CMD_DEBUG == 1
+		pr_err("bcm5357_read_byte, NAND_CMD_READOOB, page: %d, data: 0x%02x\n", nand_chip->page_shift, data);
+#endif
+
 		break;
 	default:
 		pr_err("Invalid command for byte read: 0x%X\n", b47n->curr_command);
@@ -735,22 +761,19 @@ int bcm47xxnflash_ops_bcm5357_init(struct bcm47xxnflash *b47n)
 
 	nand_chip->cmd_ctrl = bcm47xxnflash_ops_bcm5357_cmd_ctrl;
 	nand_chip->dev_ready = bcm47xxnflash_ops_bcm5357_dev_ready;
-
-	b47n->nand_chip.cmdfunc = bcm47xxnflash_ops_bcm5357_cmdfunc;
-	b47n->nand_chip.read_buf = bcm47xxnflash_ops_bcm5357_read_buf;
-	b47n->nand_chip.write_buf = bcm47xxnflash_ops_bcm5357_write_buf;
-        b47n->nand_chip.read_byte = bcm47xxnflash_ops_bcm5357_read_byte;
-
-	b47n->nand_chip.onfi_set_features = nand_onfi_get_set_features_notsupp;
-	b47n->nand_chip.onfi_get_features = nand_onfi_get_set_features_notsupp;
+	nand_chip->cmdfunc = bcm47xxnflash_ops_bcm5357_cmdfunc;
+	nand_chip->read_buf = bcm47xxnflash_ops_bcm5357_read_buf;
+	nand_chip->write_buf = bcm47xxnflash_ops_bcm5357_write_buf;
+        nand_chip->read_byte = bcm47xxnflash_ops_bcm5357_read_byte;
+	nand_chip->onfi_set_features = nand_onfi_get_set_features_notsupp;
+	nand_chip->onfi_get_features = nand_onfi_get_set_features_notsupp;
 
 	/* As per K9F1G08U0D data sheet Rev 0.0 Dec 9 2009, page 13 tR */
 	nand_chip->chip_delay = 35;
-
-	b47n->nand_chip.bbt_options = NAND_BBT_USE_FLASH;
+	nand_chip->bbt_options = NAND_BBT_USE_FLASH;
 
 	/* FIXME: Just hoping for the best */
-	b47n->nand_chip.ecc.mode = NAND_ECC_NONE;
+	nand_chip->ecc.mode = NAND_ECC_NONE;
 
 	reg = bcma_cc_read32(cc, BCMA_CC_NAND_ACC_CONTROL);
 	pr_err("BCMA_CC_NAND_ACC_CONTROL: 0x%08x\n", reg);
@@ -767,19 +790,9 @@ int bcm47xxnflash_ops_bcm5357_init(struct bcm47xxnflash *b47n)
 	reg = bcma_cc_read32(cc, BCMA_CC_NAND_ACC_CONTROL);
 	pr_err("BCMA_CC_NAND_ACC_CONTROL: 0x%08x\n", reg);
 
-	/* FIXME: Must enable ecc configuration here */
-	/* bcm47xxnflash_ops_bcm5357_enable(cc, false); */
-
-	/* bcm47xxnflash_ops_bcm5357_dump_regs(cc); */
-
-	/* for (i = 0; i < 0xFFFF; i += 4) { */
-	/* 	reg = bcma_cc_read32(cc, i); */
-	/* 	pr_err("0x%08X, 0x%08x\n", i, reg); */
-        /* } */
-
 	/* Scan NAND */
 	pr_err("Scanning nand\n");
-	err = nand_scan(nand_to_mtd(&b47n->nand_chip), 1);
+	err = nand_scan(nand_to_mtd(nand_chip), 1);
 
 	if (err) {
 		pr_err("Could not scan NAND flash: %d\n", err);
