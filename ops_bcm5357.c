@@ -85,7 +85,7 @@
 /* Below is assumed */
 #define NIST_FLASH_STATUS_ERROR         0x00000001
 
-#define NF_RETRIES	                100000
+#define NF_RETRIES	                10000
 #define NFL_SECTOR_SIZE			512
 
 #define BCM5357_CMD_DEBUG 1
@@ -481,6 +481,11 @@ static int bcm47xxnflash_ops_bcm5357_dev_ready(struct mtd_info *mtd)
 	struct bcma_drv_cc *cc = b47n->cc;
 
 	u32 val;
+	u32 ret;
+
+	ret = 0;
+	mutex_lock(&b47n->cmd_l);
+	bcm47xxnflash_ops_bcm5357_enable(cc, true);
 
 	bcm47xxnflash_ops_bcm5357_ctl_cmd(cc, NCMD_STATUS_RD);
 
@@ -492,13 +497,16 @@ static int bcm47xxnflash_ops_bcm5357_dev_ready(struct mtd_info *mtd)
 		pr_err("bcm5357_dev_ready, device is ready\n");
 #endif
 
-	    return ~0;
+	    ret = ~0;
 	}
 #if BCM5357_CMD_DEBUG == 1
 	pr_err("bcm5357_dev_ready, device is NOT ready: 0x%08x\n", val);
 #endif
 
-        return 0;
+	mutex_unlock(&b47n->cmd_l);
+	bcm47xxnflash_ops_bcm5357_enable(cc, false);
+
+        return ret;
 }
 
 static void bcm47xxnflash_ops_bcm5357_erase(struct mtd_info *mtd,
@@ -527,7 +535,7 @@ static void bcm47xxnflash_ops_bcm5357_erase(struct mtd_info *mtd,
 	panic("Tried to erase block: %d\n", page_addr << nand_chip->page_shift);
 	/* bcm47xxnflash_ops_bcm5357_ctl_cmd(cc, NCMD_BLOCK_ERASE); */
 
-	if (bcm47xxnflash_ops_bcm5357_poll(cc, 0) < 0) {
+	if (bcm47xxnflash_ops_bcm5357_poll(cc, NIST_ERASED) < 0) {
 		pr_err("Failed to erase block: %d\n", page_addr << nand_chip->page_shift);
 	}
 }
@@ -592,7 +600,6 @@ static void bcm47xxnflash_ops_bcm5357_cmdfunc(struct mtd_info *mtd,
 #if BCM5357_CMD_DEBUG
 		pr_err("bcm5357_cmdfunc, NAND_CMD_STATUS, col: %d, page: %d\n", column, page_addr);
 #endif
-		bcm47xxnflash_ops_bcm5357_ctl_cmd(cc, NCMD_STATUS_RD);
 		break;
 	case NAND_CMD_READ0:
 #if BCM5357_CMD_DEBUG
@@ -667,6 +674,9 @@ static u8 bcm47xxnflash_ops_bcm5357_read_byte(struct mtd_info *mtd)
 	u8 data;
 	u32 tmp;
 
+	mutex_lock(&b47n->cmd_l);
+	bcm47xxnflash_ops_bcm5357_enable(cc, true);
+
 	data = 0;
 	switch (b47n->curr_command) {
 	case NAND_CMD_READID:
@@ -705,6 +715,9 @@ static u8 bcm47xxnflash_ops_bcm5357_read_byte(struct mtd_info *mtd)
 	default:
 		pr_err("Invalid command for byte read: 0x%X\n", b47n->curr_command);
 	}
+
+	mutex_unlock(&b47n->cmd_l);
+	bcm47xxnflash_ops_bcm5357_enable(cc, false);
 
 	return data;
 }
