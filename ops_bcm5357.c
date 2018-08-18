@@ -225,6 +225,7 @@ static int bcm47xxnflash_ops_bcm5357_poll(struct bcma_drv_cc *cc, u32 pollmask)
 		if ((val & pollmask) == pollmask) {
 			return 0;
 		}
+		/* This is a hack, but without some waiting the controller becomes sad and only outputs dummy data */
 		udelay(1000);
 	}
 
@@ -532,7 +533,7 @@ static void bcm47xxnflash_ops_bcm5357_erase(struct mtd_info *mtd,
 
         bcma_cc_write32(cc, BCMA_CC_NAND_CMD_ADDR, page_addr << nand_chip->page_shift);
 
-	panic("Tried to erase block: %d\n", page_addr << nand_chip->page_shift);
+	panic("Tried to erase block: %d\n", page_addr << nand_chip->phys_erase_shift);
 	/* bcm47xxnflash_ops_bcm5357_ctl_cmd(cc, NCMD_BLOCK_ERASE); */
 
 	if (bcm47xxnflash_ops_bcm5357_poll(cc, NIST_ERASED) < 0) {
@@ -788,7 +789,7 @@ int bcm47xxnflash_ops_bcm5357_init(struct bcm47xxnflash *b47n)
 	nand_chip->chip_delay = 35;
 	nand_chip->bbt_options = NAND_BBT_USE_FLASH;
 
-	/* FIXME: Just hoping for the best */
+	/* FIXME: Need to add ECC checks */
 	nand_chip->ecc.mode = NAND_ECC_NONE;
 
 	reg = bcma_cc_read32(cc, BCMA_CC_NAND_ACC_CONTROL);
