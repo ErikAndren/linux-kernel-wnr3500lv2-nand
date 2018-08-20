@@ -252,40 +252,31 @@ static void bcm47xxnflash_ops_bcm5357_read_oob(struct mtd_info *mtd, uint8_t *bu
 
 	offset = b47n->curr_page_addr << nand_chip->page_shift;
 
-#if BCM5357_CMD_DEBUG == 1
-	pr_err("bcm5357_read_oob, offset: 0x%08x, len: %d\n", offset, len);
-#endif
+/* #if BCM5357_CMD_DEBUG == 1 */
+/* 	pr_err("bcm5357_read_oob, offset: 0x%08x, len: %d\n", offset, len); */
+/* #endif */
 
 	mutex_lock(&b47n->cmd_l);
 	bcm47xxnflash_ops_bcm5357_enable(cc, true);
 
 	while (len > 0) {
 		bcma_cc_write32(cc, BCMA_CC_NAND_CMD_ADDR, offset);
+		bcma_cc_read32(cc, BCMA_CC_NAND_CMD_ADDR);
 
-		__sync();
 		bcm47xxnflash_ops_bcm5357_ctl_cmd(cc, NCMD_SPARE_RD);
+		udelay(nand_chip->chip_delay);
+
 		if (bcm47xxnflash_ops_bcm5357_poll(cc, NIST_SPARE_VALID) < 0) {
 			pr_err("Failed SPARE_RD\n");
 			break;
 		}
 
-		__sync();
-
+		/* FIXME: replace with with page / subpage */
 		toread = min(len, (int) mtd->oobsize / 4);
 		/* Current theory is that _rd0-3 regs expose the 16 bytes associated with each subpage. Not verified yet */
 		for (i = 0; i < toread; i += sizeof(buf32), buf32++) {
 			if (i < 16) {
 				*buf32 = bcma_cc_read32(cc, BCMA_CC_NAND_SPARE_RD0 + i);
-
-				/* Only check first byte, first subpage and page 0 and 1 */
-				if ((i == 0) && ((*buf32 & 0xFF) != 0xFF) &&
-				    ((offset & 0x300) == 0) && ((b47n->curr_page_addr & 0x3F) <= 1)) {
-					pr_err("Block %u is bad: 0x%02x\n",
-					       offset >> nand_chip->phys_erase_shift,
-					       *buf32 & 0xFF);
-				}
-			} else if (i < 32) {
-				*buf32 = bcma_cc_read32(cc, BCMA_CC_NAND_SPARE_RD16 + (i - 16));
 			}
 #if BCM5357_DATA_DEBUG == 2
 			printk("bcm5357_read_oob, addr: 0x%08x, 0x%08x\n", offset + i, *buf32);
@@ -322,6 +313,7 @@ static void bcm47xxnflash_ops_bcm5357_read(struct mtd_info *mtd, uint8_t *buf,
 	pr_err("bcm5357_read command, offset: 0x%08x, len: %d\n", offset, len);
 #endif
 
+	/* FIXME: Possible improvements are to allow non-aligned reads */
 	if (offset & mask) {
 		pr_err("Tried perform a non-aligned read\n");
 		return;
@@ -336,7 +328,6 @@ static void bcm47xxnflash_ops_bcm5357_read(struct mtd_info *mtd, uint8_t *buf,
 	bcm47xxnflash_ops_bcm5357_enable(cc, true);
 
 	bcma_cc_write32(cc, BCMA_CC_NAND_CACHE_ADDR, 0);
-
 	while (len > 0) {
 		if (bcm47xxnflash_ops_bcm5357_poll(cc, 0) < 0) {
 			panic("Device not ready to read\n");
@@ -348,6 +339,8 @@ static void bcm47xxnflash_ops_bcm5357_read(struct mtd_info *mtd, uint8_t *buf,
 		pr_err("New read, offset: 0x%08x, toread: %d\n", offset, toread);
 #endif
 		bcma_cc_write32(cc, BCMA_CC_NAND_CMD_ADDR, offset);
+		bcma_cc_read32(cc, BCMA_CC_NAND_CMD_ADDR);
+
 		bcm47xxnflash_ops_bcm5357_ctl_cmd(cc, NCMD_PAGE_RD);
 		udelay(nand_chip->chip_delay);
 
@@ -360,22 +353,10 @@ static void bcm47xxnflash_ops_bcm5357_read(struct mtd_info *mtd, uint8_t *buf,
 
 		/* Awful hack, but sometimes reads fail for unknown reason, just repeat for now */
 		if (*buf32 == 0x3c12b800) {
-			/* FIXME: Dump out registers here and compare with dump if success */
-			/* printk("Read failed, interface status: 0x%08x\n", bcma_cc_read32(cc, BCMA_CC_NAND_INTFC_STATUS)); */
-
 			/* pr_err("Read failed, retrying\n"); */
 			stuck++;
 			if (stuck > 10) {
 				panic("Read is stuck\n");
-
-				/* FIXME: Do a flash reset */
-				bcm47xxnflash_ops_bcm5357_ctl_cmd(cc, NCMD_FLASH_RESET);
-				if (bcm47xxnflash_ops_bcm5357_poll(cc, 0) < 0) {
-					pr_err("Read got stuck for real. Reg dump:\n");
-					bcm47xxnflash_ops_bcm5357_dump_regs(cc);
-					panic("Reg dump done\n");
-				}
-				stuck = 0;
 			}
 			continue;
 		}
@@ -436,6 +417,8 @@ static void bcm47xxnflash_ops_bcm5357_write(struct mtd_info *mtd,
 			/* I don't fully understand this logic */
 			if (i % NFL_SECTOR_SIZE == 0) {
 				bcma_cc_write32(cc, BCMA_CC_NAND_CMD_ADDR, i);
+				bcma_cc_read32(cc, BCMA_CC_NAND_CMD_ADDR);
+
 			}
 
 			bcma_cc_write32(cc, BCMA_CC_NAND_CACHE_DATA, *from);
@@ -443,6 +426,8 @@ static void bcm47xxnflash_ops_bcm5357_write(struct mtd_info *mtd,
 
 		/* Set cmd address to end of page - last sector size */
 		bcma_cc_write32(cc, BCMA_CC_NAND_CMD_ADDR, offset + mtd->writesize - NFL_SECTOR_SIZE);
+		bcma_cc_read32(cc, BCMA_CC_NAND_CMD_ADDR);
+
 		pr_err("Page programming disabled for now\n");
 		break;
 
@@ -541,6 +526,7 @@ static void bcm47xxnflash_ops_bcm5357_erase(struct mtd_info *mtd,
 	}
 
         bcma_cc_write32(cc, BCMA_CC_NAND_CMD_ADDR, page_addr << nand_chip->page_shift);
+	bcma_cc_read32(cc, BCMA_CC_NAND_CMD_ADDR);
 
 	panic("Tried to erase block: %u\n", page_addr >> (nand_chip->phys_erase_shift - nand_chip->page_shift));
 	/* bcm47xxnflash_ops_bcm5357_ctl_cmd(cc, NCMD_BLOCK_ERASE); */
