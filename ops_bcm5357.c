@@ -176,8 +176,10 @@ static inline int bcm47xxnflash_ops_bcm5357_ctl_cmd(struct bcma_drv_cc *cc, u32 
 }
 
 static inline void bcm47xxnflash_ops_bcm5357_calc_and_set_offset(struct bcm47xxnflash *b47n, int page_addr, int column) {
-	/* Do we need to account for spare area? */
-        bcma_cc_write32(b47n->cc, BCMA_CC_NAND_CMD_ADDR, (page_addr << (b47n->nand_chip.page_shift)) | column);
+	if (column > 0) {
+		panic("Tried to set column in cmd addr\n");
+	}
+        bcma_cc_write32(b47n->cc, BCMA_CC_NAND_CMD_ADDR, page_addr << b47n->nand_chip.page_shift);
 }
 
 static void bcm47xxnflash_ops_bcm5357_enable(struct bcma_drv_cc *cc, bool enable)
@@ -333,7 +335,7 @@ static void bcm47xxnflash_ops_bcm5357_read(struct mtd_info *mtd, uint8_t *buf,
 			panic("Device not ready to read\n");
 		}
 
-	       toread = min(len, NFL_SECTOR_SIZE);
+		toread = min(len, NFL_SECTOR_SIZE);
 
 #if BCM5357_DATA_DEBUG == 1
 		pr_err("New read, offset: 0x%08x, toread: %d\n", offset, toread);
@@ -353,9 +355,8 @@ static void bcm47xxnflash_ops_bcm5357_read(struct mtd_info *mtd, uint8_t *buf,
 
 		/* Awful hack, but sometimes reads fail for unknown reason, just repeat for now */
 		if (*buf32 == 0x3c12b800) {
-			/* pr_err("Read failed, retrying\n"); */
 			stuck++;
-			if (stuck > 10) {
+			if (stuck >= 10) {
 				panic("Read is stuck\n");
 			}
 			continue;
@@ -392,13 +393,25 @@ static void bcm47xxnflash_ops_bcm5357_write(struct mtd_info *mtd,
 	u32 *from;
 	int towrite;
 	u64 offset;
+	u32 mask;
 
+	mask = NFL_SECTOR_SIZE - 1;
         offset = (b47n->curr_page_addr << (nand_chip->page_shift)) | b47n->curr_column;
 	from = (u32 *) buf;
 
 #if BCM5357_CMD_DEBUG == 1
 	pr_err("bcm5357_write, offset: 0x%08llx, len: %d\n", offset, len);
 #endif
+
+	if ((offset & mask) > 0) {
+		pr_err("Invalid address offset, must be page-aligned\n");
+		return;
+	}
+
+	if ((len & mask) > 0) {
+		pr_err("Must write full pages\n");
+		return;
+	}
 
 	mutex_lock(&b47n->cmd_l);
 	bcm47xxnflash_ops_bcm5357_enable(cc, true);
@@ -414,7 +427,7 @@ static void bcm47xxnflash_ops_bcm5357_write(struct mtd_info *mtd,
 		/* Transfer data to nand controller cache */
 		for (i = 0; i < towrite; i += sizeof(from), from++) {
 			/* Reset cmd addr for each sector */
-			/* I don't fully understand this logic */
+			/* I don't fully understand this logic, should not be needed */
 			if (i % NFL_SECTOR_SIZE == 0) {
 				bcma_cc_write32(cc, BCMA_CC_NAND_CMD_ADDR, i);
 				bcma_cc_read32(cc, BCMA_CC_NAND_CMD_ADDR);
