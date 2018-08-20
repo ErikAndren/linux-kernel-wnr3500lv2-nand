@@ -272,9 +272,18 @@ static void bcm47xxnflash_ops_bcm5357_read_oob(struct mtd_info *mtd, uint8_t *bu
 		__sync();
 
 		toread = min(len, (int) mtd->oobsize / 4);
-		for (i = 0; i < toread; i += 4, buf32++) {
+		/* Current theory is that _rd0-3 regs expose the 16 bytes associated with each subpage. Not verified yet */
+		for (i = 0; i < toread; i += sizeof(buf32), buf32++) {
 			if (i < 16) {
 				*buf32 = bcma_cc_read32(cc, BCMA_CC_NAND_SPARE_RD0 + i);
+
+				/* Only check first byte, first subpage and page 0 and 1 */
+				if ((i == 0) && ((*buf32 & 0xFF) != 0xFF) &&
+				    ((offset & 0x300) == 0) && ((b47n->curr_page_addr & 0x3F) <= 1)) {
+					pr_err("Block %u is bad: 0x%02x\n",
+					       offset >> nand_chip->phys_erase_shift,
+					       *buf32 & 0xFF);
+				}
 			} else if (i < 32) {
 				*buf32 = bcma_cc_read32(cc, BCMA_CC_NAND_SPARE_RD16 + (i - 16));
 			}
@@ -533,7 +542,7 @@ static void bcm47xxnflash_ops_bcm5357_erase(struct mtd_info *mtd,
 
         bcma_cc_write32(cc, BCMA_CC_NAND_CMD_ADDR, page_addr << nand_chip->page_shift);
 
-	panic("Tried to erase block: %d\n", page_addr << nand_chip->phys_erase_shift);
+	panic("Tried to erase block: %u\n", page_addr >> (nand_chip->phys_erase_shift - nand_chip->page_shift));
 	/* bcm47xxnflash_ops_bcm5357_ctl_cmd(cc, NCMD_BLOCK_ERASE); */
 
 	if (bcm47xxnflash_ops_bcm5357_poll(cc, NIST_ERASED) < 0) {
@@ -607,11 +616,10 @@ static void bcm47xxnflash_ops_bcm5357_cmdfunc(struct mtd_info *mtd,
 		pr_err("bcm5357_cmdfunc, NAND_CMD_READ0, col: %d, page: %d\n", column, page_addr);
 #endif
 
-		/* FIXME: Nop this as the 4706, no clue what to do */
 		break;
 	case NAND_CMD_READOOB:
 #if BCM5357_CMD_DEBUG
-		pr_err("bcm5357_cmdfunc, NAND_CMD_READOOB, col: %d, page: %d\n", column, page_addr);
+		pr_err("bcm5357_cmdfunc, NAND_CMD_READOOB, col: %d, page: %d, block: %d\n", column, page_addr, page_addr >> (nand_chip->phys_erase_shift - nand_chip->page_shift));
 #endif
 
 		break;
