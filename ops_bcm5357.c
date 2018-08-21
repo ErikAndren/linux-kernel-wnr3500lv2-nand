@@ -82,10 +82,14 @@
 #define	NIST_SPARE_VALID		0x10000000
 #define	NIST_ERASED			0x08000000
 #define	NIST_STATUS			0x000000ff
-/* Below is assumed */
-#define NIST_FLASH_STATUS_ERROR         0x00000001
 
-#define NF_RETRIES	                10000
+/* #define NAND_STATUS_FAIL	            0x01 */
+/* #define NAND_STATUS_FAIL_N1              0x02 */
+/* #define NAND_STATUS_TRUE_READY	    0x20 */
+/* #define NAND_STATUS_READY	            0x40 */
+/* #define NAND_STATUS_WP		    0x80 */
+
+#define NF_RETRIES	                100000
 #define NFL_SECTOR_SIZE			512
 
 #define BCM5357_CMD_DEBUG 1
@@ -219,7 +223,7 @@ static int bcm47xxnflash_ops_bcm5357_poll(struct bcma_drv_cc *cc, u32 pollmask)
 		pr_err("INTFC_ST: 0x%08x\n", val);
 #endif
 
-		if (val & NIST_FLASH_STATUS_ERROR) {
+		if (val & NAND_STATUS_FAIL) {
 			pr_err("Flash status error\n");
 			return BRCMNAND_FLASH_STATUS_ERROR;
 		}
@@ -249,7 +253,7 @@ static int bcm47xxnflash_ops_bcm5357_poll_debug(struct bcma_drv_cc *cc, u32 poll
 
 		pr_err("INTFC_ST: 0x%08x\n", val);
 
-		if (val & NIST_FLASH_STATUS_ERROR) {
+		if (val & NAND_STATUS_FAIL) {
 			pr_err("Flash status error\n");
 			return BRCMNAND_FLASH_STATUS_ERROR;
 		}
@@ -308,7 +312,7 @@ static void bcm47xxnflash_ops_bcm5357_read_oob(struct mtd_info *mtd, uint8_t *bu
 			break;
 		}
 
-		toread = min(len, qmtd->oobsize / (mtd->writesize / NFL_SECTOR_SIZE));
+		toread = min(len, mtd->oobsize / (mtd->writesize / NFL_SECTOR_SIZE));
 		/* Current theory is that _rd0-3 regs expose the 16 bytes associated with each subpage. Not verified yet */
 		for (i = 0; i < toread; i += sizeof(buf32), buf32++) {
 			*buf32 = bcma_cc_read32(cc, BCMA_CC_NAND_SPARE_RD0 + i);
@@ -363,7 +367,7 @@ static void bcm47xxnflash_ops_bcm5357_read(struct mtd_info *mtd, uint8_t *buf,
 
 	bcma_cc_write32(cc, BCMA_CC_NAND_CACHE_ADDR, 0);
 	while (len > 0) {
-		if (bcm47xxnflash_ops_bcm5357_poll(cc, 0) < 0) {
+		if (bcm47xxnflash_ops_bcm5357_poll(cc, NAND_STATUS_READY) < 0) {
 			panic("Device not ready to read\n");
 		}
 
