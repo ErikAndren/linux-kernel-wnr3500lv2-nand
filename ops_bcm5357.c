@@ -96,10 +96,11 @@
 #define BCM5357_CMD_DEBUG 1
 #define BCM5357_DATA_DEBUG 0
 #define BCM5357_NAND_ENABLE_DEBUG 0
-#define BCM5357_POLL_DEBUG 0
+#define BCM5357_POLL_DEBUG 1
 
 #define BRCMNAND_FLASH_STATUS_ERROR         (-2)
 #define BRCMNAND_TIMED_OUT                  (-3)
+#define BRCMNAND_READING_ERASED_BLOCK       (-4)
 
 
 /* K9F1G08XD has 64K pages = 1024 blocks */
@@ -216,7 +217,14 @@ static int bcm47xxnflash_ops_bcm5357_poll(struct bcma_drv_cc *cc, u32 pollmask)
 
 #if BCM5357_POLL_DEBUG == 1
 		pr_err("INTFC_ST: 0x%08x\n", val);
+
+		if (val & NIST_ERASED) {
+			pr_err("Reading from erased block\n");
+			return BRCMNAND_READING_ERASED_BLOCK;
+		}
+
 #endif
+		/* FIXME: Need to handle when controller informs that block is erased */
 
 		if ((val & pollmask) == pollmask) {
 			return 0;
@@ -329,7 +337,7 @@ static void bcm47xxnflash_ops_bcm5357_read(struct mtd_info *mtd, uint8_t *buf,
 		bcma_cc_write32(cc, BCMA_CC_NAND_CMD_ADDR, offset);
 		bcm47xxnflash_ops_bcm5357_ctl_cmd(cc, NCMD_PAGE_RD);
 		if (bcm47xxnflash_ops_bcm5357_poll(cc, NIST_CACHE_VALID) < 0) {
-			panic("Failed PAGE_RD\n");
+			pr_err("Failed PAGE_RD\n");
 			break;
 		}
 
@@ -631,13 +639,9 @@ static void bcm47xxnflash_ops_bcm5357_cmdfunc(struct mtd_info *mtd,
 		bcm47xxnflash_ops_bcm5357_calc_and_set_offset(b47n, page_addr, column);
 
 		if (column >= mtd->writesize) {
-                        if (bcm47xxnflash_ops_bcm5357_ctl_cmd(cc, NAND_CMD_READOOB) < 0) {
-			           pr_err("SEQIN, READ00B failed\n");
-                        }
+			bcm47xxnflash_ops_bcm5357_ctl_cmd(cc, NAND_CMD_READOOB);
 		} else {
-	                if (bcm47xxnflash_ops_bcm5357_ctl_cmd(cc, NAND_CMD_READ0) < 0) {
-			           pr_err("SEQIN, READ failed\n");
-                        }
+	                bcm47xxnflash_ops_bcm5357_ctl_cmd(cc, NAND_CMD_READ0);
 		}
 
 		break;
