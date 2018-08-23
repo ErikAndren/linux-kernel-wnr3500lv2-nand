@@ -96,20 +96,12 @@
 #define BCM5357_CMD_DEBUG 1
 #define BCM5357_DATA_DEBUG 0
 #define BCM5357_NAND_ENABLE_DEBUG 0
-#define BCM5357_POLL_DEBUG 1
+#define BCM5357_POLL_DEBUG 0
 
 #define BRCMNAND_FLASH_STATUS_ERROR         (-2)
 #define BRCMNAND_TIMED_OUT                  (-3)
 #define BRCMNAND_READING_ERASED_BLOCK       (-4)
 
-
-/* K9F1G08XD has 64K pages = 1024 blocks */
-/* 1 Block is 64 pages (128k + 4k), 1 Page = 2K + 64 bytes */
-/* 65536 pages i.e 16 bits */
-/* Column address is A0 - A11 = 12 bits = 2**12 = 2048 bytes */
-/* Row address is A12 - A27 = 2**16 bits = 65536 */
-/* Column is within a page */
-/* Page addr is all pages */
 
 /**************************************************
  * Various helpers
@@ -217,14 +209,11 @@ static int bcm47xxnflash_ops_bcm5357_poll(struct bcma_drv_cc *cc, u32 pollmask)
 
 #if BCM5357_POLL_DEBUG == 1
 		pr_err("INTFC_ST: 0x%08x\n", val);
-
+#endif
 		if (val & NIST_ERASED) {
 			pr_err("Reading from erased block\n");
 			return BRCMNAND_READING_ERASED_BLOCK;
 		}
-
-#endif
-		/* FIXME: Need to handle when controller informs that block is erased */
 
 		if ((val & pollmask) == pollmask) {
 			return 0;
@@ -329,7 +318,11 @@ static void bcm47xxnflash_ops_bcm5357_read(struct mtd_info *mtd, uint8_t *buf,
 	bcm47xxnflash_ops_bcm5357_enable(cc, true);
 
 	while (len > 0) {
-		toread = min(len, NFL_SECTOR_SIZE);
+		bcm47xxnflash_ops_bcm5357_ctl_cmd(cc, NCMD_STATUS_RD);
+		if (bcm47xxnflash_ops_bcm5357_poll(cc, NAND_STATUS_READY) < 0) {
+			pr_err("NAND controller not ready to read\n");
+			break;
+		}
 
 #if BCM5357_DATA_DEBUG == 1
 		pr_err("New read, offset: 0x%08x, toread: %d\n", offset, toread);
@@ -344,11 +337,10 @@ static void bcm47xxnflash_ops_bcm5357_read(struct mtd_info *mtd, uint8_t *buf,
 		bcma_cc_write32(cc, BCMA_CC_NAND_CACHE_ADDR, 0);
 
 		*buf32 = bcma_cc_read32(cc, BCMA_CC_NAND_CACHE_DATA);
-
 		/* Awful hack, but sometimes reads fail for unknown reason, just repeat for now */
 		if (*buf32 == 0x3c12b800) {
 			stuck++;
-			if (stuck >= 10) {
+			if (stuck >= 100) {
 				panic("Read is stuck\n");
 			}
 			continue;
@@ -359,6 +351,7 @@ static void bcm47xxnflash_ops_bcm5357_read(struct mtd_info *mtd, uint8_t *buf,
 			printk("b%08x %08x\n", offset, *buf32);
 #endif
 
+		toread = min(len, NFL_SECTOR_SIZE);
 		for (i = 4; i < toread; i += sizeof(buf32), buf32++) {
 			*buf32 = bcma_cc_read32(cc, BCMA_CC_NAND_CACHE_DATA);
 
@@ -488,12 +481,12 @@ static int bcm47xxnflash_ops_bcm5357_dev_ready(struct mtd_info *mtd)
 	mutex_lock(&b47n->cmd_l);
 	bcm47xxnflash_ops_bcm5357_enable(cc, true);
 
+	/* FIXME: Add NAND_STATUS_READY */
 	bcm47xxnflash_ops_bcm5357_ctl_cmd(cc, NCMD_STATUS_RD);
-
 	val = bcma_cc_read32(cc, BCMA_CC_NAND_INTFC_STATUS);
 
-	if ((val & (NIST_CTRL_READY | NIST_FLASH_READY)) ==
-	    (NIST_CTRL_READY | NIST_FLASH_READY)) {
+	if ((val & (NIST_CTRL_READY | NIST_FLASH_READY | NAND_STATUS_READY)) ==
+	    (NIST_CTRL_READY | NIST_FLASH_READY | NAND_STATUS_READY)) {
 #if BCM5357_CMD_DEBUG
 		pr_err("bcm5357_dev_ready, device is ready\n");
 #endif
@@ -612,7 +605,7 @@ static void bcm47xxnflash_ops_bcm5357_cmdfunc(struct mtd_info *mtd,
 		break;
 	case NAND_CMD_READ0:
 #if BCM5357_CMD_DEBUG
-		pr_err("bcm5357_cmdfunc, NAND_CMD_READ0, col: %d, page: %d\n", column, page_addr);
+		pr_err("bcm5357_cmdfunc, NAND_CMD_READ0, col: %d, page: %d, block: %d\n", column, page_addr, page_addr >> (nand_chip->phys_erase_shift - nand_chip->page_shift));
 #endif
 
 		break;
