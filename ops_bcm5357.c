@@ -626,17 +626,9 @@ static void bcm47xxnflash_ops_bcm5357_cmdfunc(struct mtd_info *mtd,
 		break;
 	case NAND_CMD_SEQIN:
 #if BCM5357_CMD_DEBUG
-		pr_err("bcm5357_cmdfunc, NAND_CMD_SEQIN, col: %d, page: %d\n", column, page_addr);
+		pr_err("bcm5357_cmdfunc, NAND_CMD_SEQIN, col: %d, page: %d, block: %d\n", column, page_addr, page_addr >> (nand_chip->phys_erase_shift - nand_chip->page_shift));
 #endif
-
-		bcm47xxnflash_ops_bcm5357_calc_and_set_offset(b47n, page_addr, column);
-
-		if (column >= mtd->writesize) {
-			bcm47xxnflash_ops_bcm5357_ctl_cmd(cc, NAND_CMD_READOOB);
-		} else {
-	                bcm47xxnflash_ops_bcm5357_ctl_cmd(cc, NAND_CMD_READ0);
-		}
-
+		/* This is a NOP */
 		break;
 	case NAND_CMD_PAGEPROG:
 
