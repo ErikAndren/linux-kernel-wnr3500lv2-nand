@@ -68,15 +68,12 @@
 #define	NAC_ECC_LEVEL_SHIFT		16
 /* Spare sizes are per sub page */
 #define	NAC_SPARE_SIZE0			0x00003f00
-/* SPARE_SIZE0 cannot be set to 0x40 */
 #define NAC_SPARE_SIZE0_SHIFT           8
 #define	NAC_SPARE_SIZE			0x0000003f
-/* SPARE_SIZE cannot be set to 0x40 */
 #define NAC_SPARE_SIZE_SHIFT            0
 
 /* nand_intfc_status */
 /* What is the difference between ctrl and flash ready? */
-/* Current hypothesis is that ctrl ready means that flash is ready for a new command */
 #define	NIST_CTRL_READY			0x80000000
 #define	NIST_FLASH_READY		0x40000000
 #define	NIST_CACHE_VALID		0x20000000
@@ -211,13 +208,16 @@ static int bcm47xxnflash_ops_bcm5357_poll(struct bcma_drv_cc *cc, u32 pollmask)
 		pr_err("INTFC_ST: 0x%08x\n", val);
 #endif
 		if (val & NIST_ERASED) {
-			pr_err("Reading from erased block\n");
+			pr_err("Illegal read from erased block\n");
 			return BRCMNAND_READING_ERASED_BLOCK;
 		}
 
 		if ((val & pollmask) == pollmask) {
 			return 0;
 		}
+		/* Without this the nand controller becomes sad and doesn't want to play anymore */
+		/* Root cause still unknown. Bad clock setting? */
+		udelay(10000);
 	}
 
 	pr_err("Polling timeout, Intfc status: 0x%08x\n", val);
@@ -340,7 +340,7 @@ static void bcm47xxnflash_ops_bcm5357_read(struct mtd_info *mtd, uint8_t *buf,
 		/* Awful hack, but sometimes reads fail for unknown reason, just repeat for now */
 		if (*buf32 == 0x3c12b800) {
 			stuck++;
-			if (stuck >= 100) {
+			if (stuck >= 1000) {
 				panic("Read is stuck\n");
 			}
 			continue;
@@ -789,16 +789,15 @@ int bcm47xxnflash_ops_bcm5357_init(struct bcm47xxnflash *b47n)
 
 	/* reg = bcma_cc_read32(cc, BCMA_CC_NAND_ACC_CONTROL); */
 	/* pr_err("BCMA_CC_NAND_ACC_CONTROL: 0x%08x\n", reg); */
-
-	/* reg &= 0xFFFF0000; */
-	/* Setting to 0x40 does not work. Set to closest */
-	/* Is this per subpage, if so original value is correct */
-	/* reg |= (0x3F << NAC_SPARE_SIZE0_SHIFT) | (0x3F << NAC_SPARE_SIZE_SHIFT); */
-	/* pr_err("BCMA_CC_NAND_ACC_CONTROL: 0x%08x\n", reg); */
-	/* bcma_cc_write32(cc, BCMA_CC_NAND_ACC_CONTROL, reg); */
+	/* reg &= ~NAC_RD_ECC_EN; */
+	/* reg &= ~NAC_WR_ECC_EN; */
+	/* reg &= ~NAC_RD_ECC_BLK0_EN; */
+	/* reg &= ~NAC_FAST_PGM_RDIN; */
+	/* reg &= NAC_RD_ERASED_ECC_EN; */
 
 	/* reg = bcma_cc_read32(cc, BCMA_CC_NAND_ACC_CONTROL); */
 	/* pr_err("BCMA_CC_NAND_ACC_CONTROL: 0x%08x\n", reg); */
+	/* bcma_cc_write32(cc, BCMA_CC_NAND_ACC_CONTROL, reg); */
 
 	/* bcma_cc_write32(cc, BCMA_CC_NAND_CS_NAND_XOR, 0); */
 
