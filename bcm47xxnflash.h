@@ -20,8 +20,6 @@ struct bcm47xxnflash {
 	int curr_column;
 
 	u8 id_data[8];
-
-	struct mutex cmd_l;
 };
 
 int bcm47xxnflash_ops_bcm4706_init(struct bcm47xxnflash *b47n);
