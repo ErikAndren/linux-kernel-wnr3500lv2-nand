@@ -1,0 +1,34 @@
+This driver tries to implement support for the BCM47186/5357 NAND controller.
+It is based on the original 2.6.22 broadcom driver.
+The port should be an easy one, unfortunately something seems to be broken in the underlaying layers.
+
+A large quantity of reads fails in that the wrong data is returned. The data returned always has the same pattern, starting with 0x3cb12b800.
+This can be somewhat mitigated by waiting a bit and retrying the read again. Unfortunately this does not always work and a simple unrelated code change somewhere else in the driver can change this behavior.
+First I thought this was some kind of clock/PLL issue, but it looks like the correct values are written when comparing with the original driver.
+Currently I suspect some kind of toolchain issue but as I've been banging my head against the wall with this for a while I am now taking a break from it.
+
+In order to compile the driver, checkout the 18.06.1 openwrt, build for the wnr3500lv2 target.
+
+Checkout this repository into the build_dir/target-mipsel_74k_musl/linux-4.14.54/drivers/mtd/nand/bcm47xxnflash repository and rebuild the kernel using the
+make target/linux/install V=s command in the openwrt root.
+
+The easiest way of testing a kernel image is booting it from cfe.
+Plug in the ethernet cable in port 1 of the router and hard wire the connected NIC ip to 192.168.1.2.
+
+Hook up a 3.3V serial adapter running at 115200 bps.
+See https://openwrt.org/toh/netgear/wnr3500l?s[]=wnr3500lv2
+
+Press ctrl+c during power on in order to drop to cfe.
+If the command: ping 192.168.1.2 works then the connection works.
+You need to setup an tftp server on your computer.
+If you want to iterate fast, create a small file on your tftp server called vzimage.
+This will make the autoboot feature fail and drop you to cfe. This way you don't need to do the ctrl+c thing at bootup.
+
+In order to build a bootable elf kernel type make menuconfig in the openwrt root and do the following:
+To build an image bootable over the network select the following: “Target Images” —> [x] “ramdisk” —> Compression —> [xz] This will generate a file in bin/brcm47xx/openwrt-brcm47xx-vmlinux.elf
+
+The following example boots an elf image from the tftp server at 192.168.1.2 under the path /brcm47xx/openwrt-brcm47xx-vmlinux.elf:
+
+boot -tftp -elf 192.168.1.2:/brcm47xx/openwrt-brcm47xx-vmlinux.elf
+
+Good luck and keep me posted if you make any breakthrough!
