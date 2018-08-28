@@ -525,7 +525,8 @@ static void bcm47xxnflash_ops_bcm5357_erase(struct mtd_info *mtd,
 	if (block != 1023) {
 		panic("Tried to erase block: %u\n", block);
 	}
-	bcm47xxnflash_ops_bcm5357_ctl_cmd(cc, NCMD_BLOCK_ERASE);
+	/* This is disabled by default to prevent any accidental corruption */
+	/* bcm47xxnflash_ops_bcm5357_ctl_cmd(cc, NCMD_BLOCK_ERASE); */
 	if (bcm47xxnflash_ops_bcm5357_poll(cc, 0) < 0) {
 		pr_err("Failed to erase block: %d\n", block);
 	}
