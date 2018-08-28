@@ -31,4 +31,7 @@ The following example boots an elf image from the tftp server at 192.168.1.2 und
 
 boot -tftp -elf 192.168.1.2:/brcm47xx/openwrt-brcm47xx-vmlinux.elf
 
+If you want to setup a working environment to build the original driver you need a fedora core 6.
+I created an image in virtualbox with this environment and was successfully able to build images that worked (on a 2.6.22 kernel).
+
 Good luck and keep me posted if you make any breakthrough!
